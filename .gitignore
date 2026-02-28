@@ -1,0 +1,20 @@
+# OS
+[Dd]esktop.ini
+Thumbs.db
+.DS_Store
+
+# IDE
+.idea/
+.vs/
+*.suo
+*.user
+
+# Unity
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+*.pidb.meta
+*.pdb.meta

@@ -1,0 +1,20 @@
+{
+  "name": "com.toshi0515.unity-mqtt",
+  "rootNamespace": "",
+  "references": [
+    "UniTask"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "MQTTnet.dll",
+    "MQTTnet.Extensions.ManagedClient.dll",
+    "Newtonsoft.Json.dll"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
