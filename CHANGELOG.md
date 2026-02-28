@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0] - 2026-02-28
+
+### Changed
+- シングルトン廃止: `MqttClientManager` に public コンストラクタを追加
+- ファサードクラスを削除し、拡張メソッド (`MqttPublishExtensions`/`MqttSubscribeExtensions`/`MqttPlcCommandPublishExtensions`) に移行
+- `MqttSubscriberBridge` が自身の `MqttClientManager` インスタンスを保持し、シングルトン化
+
 ## [1.0.0] - 2026-02-28
 
 ### Added

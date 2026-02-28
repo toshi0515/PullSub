@@ -59,16 +59,35 @@ if (MqttDataRepository.Instance.TryGet<int>("Rotation", out var rotation))
 
 ### 2. コマンド送信
 
+シングルトンを廃止したため、まずは `MqttClientManager` のインスタンスを取得します。
+`MqttSubscriberBridge` 経由でも、あるいは自分で生成して構いません。
+
+非同期操作には `CancellationToken` を渡せるようになりました。通常は不要ですが、
+たとえばボタン操作に紐付けて途中キャンセルしたい場合に使用します。
+
 ```csharp
-// モーター起動
-await MqttCommandPublisher.PublishRun("ARMotorSystem/cmd", frequency: 30, direction: 0);
+var cts = new CancellationTokenSource();
 
-// モーター停止
-await MqttCommandPublisher.PublishStop("ARMotorSystem/cmd");
+// ブリッジ経由で取得する例
+var manager = MqttSubscriberBridge.Instance.Manager;
 
-// 汎用 JSON 送信
-await MqttCommandPublisher.PublishAsync("my/topic", new { message = "hello" });
+await manager.PublishRunAsync("ARMotorSystem/cmd", frequency: 30, direction: 0, ct: cts.Token);
+
+// キャンセル
+cts.Cancel();
+
+await manager.PublishStopAsync("ARMotorSystem/cmd");
+await manager.PublishAsync("my/topic", new { message = "hello" });
 ```
+
+```csharp
+// 自前で生成する場合
+var manager = new MqttClientManager("127.0.0.1", 1883);
+await manager.StartAsync();
+await manager.PublishAsync("foo", new { bar = 123 });
+```
+
+ライフタイムに沿った初期化処理にもトークンが渡せます。非アクティブ化時に自動キャンセルされます。
 
 ## 受信 JSON フォーマット
 
