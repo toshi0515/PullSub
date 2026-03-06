@@ -9,12 +9,12 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Threading;
-using System.Threading.Tasks;
 using UnityEngine;
 
 /// <summary>
-/// MQTT クライアント統一管理（シングルトン）
-/// メッセージハンドラーは自動的にUnityメインスレッドで実行される
+/// MQTT クライアント統一管理
+/// public コンストラクタでインスタンスを生成し、StartAsync で接続する。
+/// メッセージハンドラーは自動的に Unity メインスレッドで実行される。
 /// </summary>
 public sealed class MqttClientManager : IDisposable
 {
@@ -41,11 +41,12 @@ public sealed class MqttClientManager : IDisposable
         if (logError != null) _logError = logError;
         if (logException != null) _logException = logException;
     }
+
     public bool IsConnected => _client != null && _client.IsStarted;
 
     private IManagedMqttClient _client;
-    private readonly object _lock = new object();
     private bool _stopping;
+    private readonly SemaphoreSlim _stopSemaphore = new SemaphoreSlim(1, 1);
 
     // lifetime cancellation: StartAsync で生成し StopAsync/Dispose でキャンセル＆破棄
     private CancellationTokenSource _lifetimeCts;
@@ -183,47 +184,64 @@ public sealed class MqttClientManager : IDisposable
 
     public async UniTask StopAsync()
     {
-        if (_stopping) return;
-        _stopping = true;
-
-        // cancel lifetime token immediately so that any linked operations terminate
-        _lifetimeCts?.Cancel();
-
+        await _stopSemaphore.WaitAsync();
         try
         {
-            var c = _client;
-            _client = null;
+            if (_stopping) return;
+            _stopping = true;
 
-            if (c != null)
+            // cancel lifetime token immediately so that any linked operations terminate
+            _lifetimeCts?.Cancel();
+
+            try
             {
-                if (c.IsStarted)
-                {
-                    var task = c.StopAsync();
-                    var completedIndex = await UniTask.WhenAny(task.AsUniTask(), UniTask.Delay(1500));
+                var c = _client;
+                _client = null;
 
-                    if (completedIndex == 1)
+                if (c != null)
+                {
+                    if (c.IsStarted)
                     {
-                        _log?.Invoke("[WARN] ManagedMqttClient.StopAsync timeout. Disposing client.");
+                        var task = c.StopAsync();
+                        var completedIndex = await UniTask.WhenAny(task.AsUniTask(), UniTask.Delay(1500));
+
+                        if (completedIndex == 1)
+                        {
+                            _log?.Invoke("[WARN] ManagedMqttClient.StopAsync timeout. Disposing client.");
+                        }
                     }
+                    c.Dispose();
                 }
-                c.Dispose();
             }
-        }
-        catch (Exception ex)
-        {
-            _logException?.Invoke(ex, "StopAsync error", true);
+            catch (Exception ex)
+            {
+                _logException?.Invoke(ex, "StopAsync error", true);
+            }
+            finally
+            {
+                _stopping = false;
+                _lifetimeCts?.Dispose();
+                _lifetimeCts = null;
+            }
         }
         finally
         {
-            _stopping = false;
-            _lifetimeCts?.Dispose();
-            _lifetimeCts = null;
+            _stopSemaphore.Release();
         }
     }
 
     public async UniTask PublishAsync(string topic, byte[] payload, MqttQualityOfServiceLevel qos = MqttQualityOfServiceLevel.AtMostOnce, bool retain = false, CancellationToken ct = default)
     {
         await EnsureConnectedAsync(ct);
+
+        // EnsureConnectedAsync attempts to start the client, but in rare
+        // race conditions _client may still be null/not started.  Guard
+        // against misuse by throwing an explicit exception rather than
+        // silently proceeding with a null reference or wrong token.
+        if (_client == null || !_client.IsStarted)
+        {
+            throw new InvalidOperationException("MQTT client is not connected");
+        }
 
         var message = new MqttApplicationMessageBuilder()
             .WithTopic(topic)
@@ -352,7 +370,9 @@ public sealed class MqttClientManager : IDisposable
 
     public void Dispose()
     {
-        StopAsync().Forget();
+        // make sure shutdown completes before Dispose returns to avoid
+        // orphaned background operations or unfreed resources.
+        StopAsync().GetAwaiter().GetResult();
     }
 
     private async UniTask EnsureConnectedAsync(CancellationToken ct = default)
@@ -426,13 +446,18 @@ public sealed class MqttClientManager : IDisposable
 
     private static async UniTask<T> AwaitWithCancellation<T>(UniTask<T> task, CancellationToken ct)
     {
-        if (ct == CancellationToken.None)
+        if (!ct.CanBeCanceled)
         {
             return await task;
         }
 
-        var (completedLeft, result) = await UniTask.WhenAny(task, UniTask.Never(ct));
-        if (!completedLeft) throw new OperationCanceledException(ct);
-        return result;
+        // Wrap UniTask<T> as a plain UniTask so WhenAny picks the (UniTask, UniTask) -> int overload,
+        // avoiding the (UniTask<T>, UniTask<T>) -> (bool, T) tuple-returning overload.
+        async UniTask WrapAsUniTask() { await task; }
+        var index = await UniTask.WhenAny(WrapAsUniTask(), UniTask.Never(ct));
+        if (index == 1) throw new OperationCanceledException(ct);
+        // the task may have completed with an exception; await it again to
+        // propagate that exception rather than returning a default value.
+        return await task;
     }
 }

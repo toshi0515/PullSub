@@ -30,6 +30,13 @@ public sealed class MqttDataItem
 
 public static class MqttDTO
 {
+    // MqttDataEnvelope を JSON 文字列にシリアライズ（Publish 用）
+    public static string SerializeEnvelope(MqttDataEnvelope envelope)
+    {
+        if (envelope == null) throw new ArgumentNullException(nameof(envelope));
+        return JsonConvert.SerializeObject(envelope);
+    }
+
     // plc/data ペイロードをDTOへデシリアライズ
     public static bool TryDeserializeData(string json, out MqttDataEnvelope envelope, out string error)
     {

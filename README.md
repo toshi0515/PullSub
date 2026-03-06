@@ -5,10 +5,11 @@ Unity Package Manager 対応の最小限 MQTT 送受信パッケージ。
 
 ## 機能
 
-- **接続管理**: シングルトン `MqttClientManager` による自動再接続付き MQTT クライアント
+- **接続管理**: `MqttClientManager`（public コンストラクタ、シングルトン廃止）による自動再接続付き MQTT クライアント
 - **受信（Subscribe）**: トピック購読 → JSON デシリアライズ → `MqttDataRepository` へ格納
-- **送信（Publish）**: 汎用 JSON 送信 / PLC コマンド送信（RUN, STOP, SET_FREQ, SET_DIR）
+- **送信（Publish）**: 拡張メソッド（`MqttPublishExtensions` / `MqttSubscribeExtensions` / `MqttPlcCommandPublishExtensions`）による汎用 JSON 送信 / PLC コマンド送信（RUN, STOP, SET_FREQ, SET_DIR）
 - **スレッド安全**: 受信メッセージは自動的に Unity メインスレッドにディスパッチ
+- **MonoBehaviour エントリポイント**: `MqttSubscriberBridge` がシングルトンとして `MqttClientManager` インスタンスを保持
 
 ## 前提条件
 
@@ -88,6 +89,28 @@ await manager.PublishAsync("foo", new { bar = 123 });
 ```
 
 ライフタイムに沿った初期化処理にもトークンが渡せます。非アクティブ化時に自動キャンセルされます。
+
+### 3. データ送信（DataPublish）
+
+Subscribe 側と同じ `MqttDataEnvelope` 形式で Publish するための拡張メソッドです。
+
+```csharp
+var manager = MqttSubscriberBridge.Instance.Manager;
+
+// 単一値の送信
+await manager.PublishDataAsync("unity/data", "Rotation", 1500);
+
+// 複数値を Dictionary で送信
+await manager.PublishDataAsync("unity/data", new Dictionary<string, object>
+{
+    ["Rotation"] = 1500,
+    ["MotorRunning"] = true,
+});
+
+// Repository のスナップショットをそのまま転送（ミラー・中継用途）
+var snapshot = MqttDataRepository.Instance.GetAllDataSnapshot();
+await manager.PublishDataAsync("plc/mirror", snapshot);
+```
 
 ## 受信 JSON フォーマット
 

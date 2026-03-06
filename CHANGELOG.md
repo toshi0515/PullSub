@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.0] - 2026-03-06
+
+### Added
+- `MqttDataPublishExtensions` — Subscribe 側と対称な `MqttDataEnvelope` 形式でのデータ Publish 拡張メソッド（Envelope / Items / Dictionary / 単一値の 4 オーバーロード）
+- `MqttDTO.SerializeEnvelope` — Envelope の JSON シリアライズヘルパー
+
+### Changed
+- `MqttClientManager` リファクタリング: doc comment 修正、未使用フィールド (`_lock`) 削除、`SemaphoreSlim` の FQN 省略
+
 ## [1.1.0] - 2026-02-28
 
 ### Changed
