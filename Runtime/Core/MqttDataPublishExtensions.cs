@@ -63,8 +63,65 @@ public static class MqttDataPublishExtensions
     }
 
     /// <summary>
+    /// MqttDataRepository からスナップショットを取得して Publish する。
+    /// 指定されたトピック、またはリポジトリ自身のトピックに送信する。
+    /// </summary>
+    public static UniTask PublishDataAsync(
+        this MqttClientManager manager,
+        MqttDataRepository repository,
+        string topic = null,
+        CancellationToken ct = default)
+    {
+        if (repository == null)
+        {
+            manager.LogError("PublishDataAsync: repository is required.");
+            return UniTask.CompletedTask;
+        }
+
+        var targetTopic = topic ?? repository.Topic;
+        return PublishDataAsync(manager, targetTopic, repository.GetSnapshot(), ct);
+    }
+
+    /// <summary>
+    /// name/MqttDataEntry ペアの辞書から Envelope を自動生成して Publish する。
+    /// timestamp は最新のエントリ、または現在時刻（UTC / ISO8601）が使用される。
+    /// </summary>
+    public static UniTask PublishDataAsync(
+        this MqttClientManager manager,
+        string topic,
+        IReadOnlyDictionary<string, MqttDataEntry> data,
+        CancellationToken ct = default)
+    {
+        if (data == null)
+        {
+            manager.LogError("PublishDataAsync: data is required.");
+            return UniTask.CompletedTask;
+        }
+
+        var items = new List<MqttDataItem>(data.Count);
+        DateTime? maxSourceTime = null;
+
+        foreach (var kv in data)
+        {
+            items.Add(new MqttDataItem { Name = kv.Key, Value = kv.Value.Value });
+            if (kv.Value.SourceTimestampUtc.HasValue)
+            {
+                if (!maxSourceTime.HasValue || kv.Value.SourceTimestampUtc > maxSourceTime)
+                    maxSourceTime = kv.Value.SourceTimestampUtc;
+            }
+        }
+
+        var envelope = new MqttDataEnvelope
+        {
+            Timestamp = maxSourceTime?.ToString("o") ?? DateTime.UtcNow.ToString("o"),
+            Items = items
+        };
+
+        return PublishDataAsync(manager, topic, envelope, ct);
+    }
+
+    /// <summary>
     /// name/value ペアの辞書から Envelope を自動生成して Publish する。
-    /// MqttDataRepository.GetAllDataSnapshot() の戻り値をそのまま渡せる。
     /// timestamp は現在時刻（UTC / ISO8601）が自動設定される。
     /// </summary>
     public static UniTask PublishDataAsync(

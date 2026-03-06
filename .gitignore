@@ -9,6 +9,11 @@ Thumbs.db
 *.suo
 *.user
 
+# Local development .csproj / .sln (machine-specific paths, not for UPM consumers)
+*.csproj
+*.sln
+omnisharp.json
+
 # Unity
 [Ll]ibrary/
 [Tt]emp/

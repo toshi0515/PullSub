@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.0.0] - 2026-03-06
+
+### Added
+- `MqttDataStore` — トピック（デバイス）ごとのリポジトリを管理する新クラス
+- `MqttDataEntry` — 値 + ソース生成時刻 + 受信時刻を保持する高精度データモデル
+- `MqttDataRepository` — `TryGetEntry` メソッドの追加
+- `MqttTopicDefinition` — 型安全なトピックスキーマ定義の抽象基底クラス
+- `MqttField<T>` — トピックの単一データフィールドへの型安全アクセサ
+- `MqttDataStore.GetTopic<T>()` — 型安全なトピックインスタンスの取得
+
+### Changed
+- **[BREAKING]** `IDataRepository` インターフェースを廃止
+- **[BREAKING]** `MqttDataRepository` シングルトンを廃止。トピックごとにインスタンス化される設計に変更
+- **[BREAKING]** `MqttDataRepository` の辞書の値型を `object` から `MqttDataEntry` に変更
+- **[BREAKING]** `MqttDataStore` の文字列インデクサ `store["topic"]` を廃止。`store.GetTopic<T>()` を使用
+- **[BREAKING]** `MqttDataItem.Type`（PLC固有の型ヒント）を廃止。型変換は `MqttDataEntry.TryGetValue<T>` が汎用的に処理
+- **[BREAKING]** `MqttDataRepository` の PLC固有型変換ロジック（`BIT`/`WORD`/`DINT`/`REAL`）を廃止。`Convert.ChangeType` による汎用変換に置換
+- `MqttSubscriberBridge` — `Store` 経由でのアクセス、複数トピックの同時購読に対応
+
 ## [1.2.0] - 2026-03-06
 
 ### Added

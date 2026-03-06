@@ -19,10 +19,6 @@ public sealed class MqttDataItem
     [JsonProperty("name")]
     public string Name { get; set; }
 
-    // "BIT" | "WORD" | "DINT" | "REAL" など（大文字想定）
-    [JsonProperty("type")]
-    public string Type { get; set; }
-
     // Newtonsoft.Json により、数値は long/double、真偽値は bool、文字列は string になります
     [JsonProperty("value")]
     public object Value { get; set; }

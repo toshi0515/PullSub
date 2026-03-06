@@ -8,7 +8,7 @@ public static class MqttSubscribeExtensions
     public static UniTask SubscribeDataTopicAsync(
         this MqttClientManager manager,
         string topic,
-        IDataRepository repository,
+        MqttDataStore store,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(topic))
@@ -17,11 +17,13 @@ public static class MqttSubscribeExtensions
             return UniTask.CompletedTask;
         }
 
-        if (repository == null)
+        if (store == null)
         {
-            manager.LogError("SubscribeDataTopicAsync: repository is required.");
+            manager.LogError("SubscribeDataTopicAsync: store is required.");
             return UniTask.CompletedTask;
         }
+
+        var repository = store.GetOrCreate(topic);
 
         return manager.SubscribeAsync(topic, (t, bytes) =>
         {

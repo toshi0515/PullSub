@@ -3,13 +3,13 @@
 Unity Package Manager 対応の最小限 MQTT 送受信パッケージ。  
 [MQTTnet](https://github.com/dotnet/MQTTnet) v3.1.2 を使用し、Unity メインスレッドへの自動ディスパッチに対応。
 
-## 機能
+## 特徴
 
-- **接続管理**: `MqttClientManager`（public コンストラクタ、シングルトン廃止）による自動再接続付き MQTT クライアント
-- **受信（Subscribe）**: トピック購読 → JSON デシリアライズ → `MqttDataRepository` へ格納
-- **送信（Publish）**: 拡張メソッド（`MqttPublishExtensions` / `MqttSubscribeExtensions` / `MqttPlcCommandPublishExtensions`）による汎用 JSON 送信 / PLC コマンド送信（RUN, STOP, SET_FREQ, SET_DIR）
-- **スレッド安全**: 受信メッセージは自動的に Unity メインスレッドにディスパッチ
-- **MonoBehaviour エントリポイント**: `MqttSubscriberBridge` がシングルトンとして `MqttClientManager` インスタンスを保持
+- **型安全なデータアクセス**: `MqttTopicDefinition` でトピックのデータスキーマを定義し、IDE 補完と型チェックを享受
+- **マルチトピック対応**: トピックごとに独立した `MqttDataRepository` を生成
+- **高精度タイムスタンプ**: 各データアイテムごとに「送信元生成時刻」と「Unity 受信時刻」を保持
+- **柔軟な Publish**: 汎用 JSON、PLC コマンド、および Subscribe 互換形式でのデータ送信に対応
+- **スレッド安全**: メッセージ受信は自動的に Unity メインスレッドにディスパッチ
 
 ## 前提条件
 
@@ -34,105 +34,79 @@ Unity Package Manager 対応の最小限 MQTT 送受信パッケージ。
 https://github.com/Toshi-0515/unity-mqtt.git
 ```
 
-> **Note**: Private リポジトリの場合、Personal Access Token 付き URL を使用:
-> ```
-> https://YOUR_PAT@github.com/Toshi-0515/unity-mqtt.git
-> ```
-> または SSH:
-> ```
-> git@github.com:Toshi-0515/unity-mqtt.git
-> ```
-
 ## 使い方
 
-### 1. 受信のセットアップ
+### 1. トピック定義を作成する
 
-`MqttSubscriberBridge` コンポーネントを任意の GameObject にアタッチし、Inspector でブローカー IP・ポート・トピックを設定するだけで動作します。
-
-受信データは `MqttDataRepository.Instance` から取得:
+受信したいトピックのデータスキーマを `MqttTopicDefinition` を継承して定義します。  
+`MqttField<T>` のフィールド名は、受信する JSON ペイロードの `"name"` と一致させてください。
 
 ```csharp
-if (MqttDataRepository.Instance.TryGet<int>("Rotation", out var rotation))
+public class PlcDevice1Topic : MqttTopicDefinition
 {
-    Debug.Log($"Rotation: {rotation}");
+    public override string TopicPath => "plc/device1";
+
+    public readonly MqttField<int>   Rotation  = new("Rotation");
+    public readonly MqttField<float> Speed     = new("Speed");
+    public readonly MqttField<bool>  IsRunning = new("IsRunning");
 }
 ```
 
-### 2. コマンド送信
+### 2. 受信のセットアップ
 
-シングルトンを廃止したため、まずは `MqttClientManager` のインスタンスを取得します。
-`MqttSubscriberBridge` 経由でも、あるいは自分で生成して構いません。
+`MqttSubscriberBridge` コンポーネントをアタッチし、インスペクターでブローカー IP と購読したいトピックのリスト（`Topics`）を設定します。
 
-非同期操作には `CancellationToken` を渡せるようになりました。通常は不要ですが、
-たとえばボタン操作に紐付けて途中キャンセルしたい場合に使用します。
+トピック文字列（例: `"plc/device1"`）は、定義クラスの `TopicPath` と一致させてください。
 
-```csharp
-var cts = new CancellationTokenSource();
+### 3. データ取得
 
-// ブリッジ経由で取得する例
-var manager = MqttSubscriberBridge.Instance.Manager;
-
-await manager.PublishRunAsync("ARMotorSystem/cmd", frequency: 30, direction: 0, ct: cts.Token);
-
-// キャンセル
-cts.Cancel();
-
-await manager.PublishStopAsync("ARMotorSystem/cmd");
-await manager.PublishAsync("my/topic", new { message = "hello" });
-```
+`store.GetTopic<T>()` で型安全なトピックインスタンスを取得し、フィールドにアクセスします。
 
 ```csharp
-// 自前で生成する場合
-var manager = new MqttClientManager("127.0.0.1", 1883);
-await manager.StartAsync();
-await manager.PublishAsync("foo", new { bar = 123 });
+var store = MqttSubscriberBridge.Instance.Store;
+var topic = store.GetTopic<PlcDevice1Topic>();
+
+// 値のみを取得
+int rot = topic.Rotation.Value;
+
+// TryGet パターン
+if (topic.Rotation.TryGetValue(out var rotation))
+{
+    Debug.Log($"Rotation: {rotation}");
+}
+
+// タイムスタンプ付き（デジタルツイン・死活監視用）
+var entry = topic.Speed.Entry;
+if (entry != null)
+{
+    Debug.Log($"Speed: {entry.Value}");
+    Debug.Log($"ソース時刻: {entry.SourceTimestampUtc}");
+    Debug.Log($"Unity受信時刻: {entry.ReceivedUtc}");
+    Debug.Log($"データの鮮度 (秒): {entry.Age.TotalSeconds}");
+}
 ```
 
-ライフタイムに沿った初期化処理にもトークンが渡せます。非アクティブ化時に自動キャンセルされます。
+### 4. データ送信（DataPublish）
 
-### 3. データ送信（DataPublish）
-
-Subscribe 側と同じ `MqttDataEnvelope` 形式で Publish するための拡張メソッドです。
+Subscribe 側と同じ形式（`MqttDataEnvelope`）でデータを送信します。
 
 ```csharp
 var manager = MqttSubscriberBridge.Instance.Manager;
 
 // 単一値の送信
-await manager.PublishDataAsync("unity/data", "Rotation", 1500);
+await manager.PublishDataAsync("unity/data", "Status", "Running");
 
-// 複数値を Dictionary で送信
-await manager.PublishDataAsync("unity/data", new Dictionary<string, object>
-{
-    ["Rotation"] = 1500,
-    ["MotorRunning"] = true,
-});
-
-// Repository のスナップショットをそのまま転送（ミラー・中継用途）
-var snapshot = MqttDataRepository.Instance.GetAllDataSnapshot();
-await manager.PublishDataAsync("plc/mirror", snapshot);
+// 特定のトピックの内容をそのままミラー送信
+var topic = store.GetTopic<PlcDevice1Topic>();
+await manager.PublishDataAsync(topic.Repository, targetTopic: "cloud/mirror");
 ```
 
-## 受信 JSON フォーマット
+### 5. PLC コマンド送信
 
-```json
-{
-  "timestamp": "2026-02-28T05:00:00Z",
-  "items": [
-    { "name": "Rotation",        "type": "WORD", "value": 1000 },
-    { "name": "ElectricCurrent", "type": "WORD", "value": 500  },
-    { "name": "MotorRunning",    "type": "BIT",  "value": true }
-  ]
-}
+```csharp
+await manager.PublishRunAsync("motor/cmd", frequency: 60, direction: 0);
+await manager.PublishStopAsync("motor/cmd");
 ```
-
-型ヒント (`type`) に基づく自動変換: `BIT` → `bool`, `WORD`/`DINT` → `int`, `REAL` → `float`
-
-## 同梱ライブラリ
-
-| ライブラリ | バージョン | ライセンス |
-|---|---|---|
-| MQTTnet | 3.1.2 | MIT |
-| MQTTnet.Extensions.ManagedClient | 3.1.2 | MIT |
 
 ## ライセンス
 

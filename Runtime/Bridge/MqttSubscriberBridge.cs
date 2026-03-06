@@ -3,14 +3,27 @@ using UnityEngine;
 using Cysharp.Threading.Tasks;
 using System.Threading;
 
+/// <summary>
+/// MonoBehaviour エントリポイント。
+/// MQTT 接続とデータストアのライフサイクルを管理する。
+/// </summary>
 public class MqttSubscriberBridge : MonoBehaviour
 {
     private CancellationTokenSource _cts;
     private bool _isQuitting;
 
-    // explicit manager instance (singleton at bridge level)
     private MqttClientManager _manager;
+    private MqttDataStore _store = new MqttDataStore();
+
+    /// <summary>
+    /// MQTT クライアントマネージャー
+    /// </summary>
     public MqttClientManager Manager => _manager;
+
+    /// <summary>
+    /// トピックごとのデータを保持するデータストア
+    /// </summary>
+    public MqttDataStore Store => _store;
 
     public static MqttSubscriberBridge Instance { get; private set; }
 
@@ -28,7 +41,7 @@ public class MqttSubscriberBridge : MonoBehaviour
     [Header("MQTT Settings")]
     [SerializeField] private string _brokerIp = "127.0.0.1";
     [SerializeField] private int _brokerPort = 1883;
-    [SerializeField] private string _topic = "test";
+    [SerializeField] private string[] _topics = { "test" };
 
     private void OnEnable()
     {
@@ -44,7 +57,6 @@ public class MqttSubscriberBridge : MonoBehaviour
             _brokerIp = "127.0.0.1";
 #endif
 
-            // create and configure manager via constructor
             _manager = new MqttClientManager(
                 brokerIp: _brokerIp,
                 brokerPort: _brokerPort,
@@ -60,14 +72,21 @@ public class MqttSubscriberBridge : MonoBehaviour
             // クライアント開始
             await _manager.StartAsync(ct);
 
-            // 購読開始 (pass repository explicitly)
-            await _manager.SubscribeDataTopicAsync(_topic, MqttDataRepository.Instance, ct);
+            // 全トピックの購読開始
+            if (_topics != null)
+            {
+                foreach (var topic in _topics)
+                {
+                    if (string.IsNullOrWhiteSpace(topic)) continue;
+                    await _manager.SubscribeDataTopicAsync(topic, _store, ct);
+                }
+            }
         }
         catch (OperationCanceledException)
         {
-            // expected when owner disabled/destroyed; no log needed
+            // expected
         }
-        catch (System.Exception ex)
+        catch (Exception ex)
         {
             Debug.LogError($"[MqttSubscriberBridge] Initialization failed: {ex.Message}");
             Debug.LogException(ex);
@@ -76,7 +95,7 @@ public class MqttSubscriberBridge : MonoBehaviour
 
     private void OnDisable()
     {
-        if (_isQuitting) return; // application is quitting, cleanup done in OnApplicationQuit
+        if (_isQuitting) return;
 
         _cts?.Cancel();
         _cts?.Dispose();
