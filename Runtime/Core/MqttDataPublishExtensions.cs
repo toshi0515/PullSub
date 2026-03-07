@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using Cysharp.Threading.Tasks;
+using MQTTnet.Protocol;
 
 /// <summary>
 /// MqttClientManager の拡張メソッド — MqttDataEnvelope 形式でデータを Publish する。
@@ -18,6 +19,8 @@ public static class MqttDataPublishExtensions
         this MqttClientManager manager,
         string topic,
         MqttDataEnvelope envelope,
+        MqttQualityOfServiceLevel qos = MqttQualityOfServiceLevel.AtMostOnce,
+        bool retain = false,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(topic))
@@ -34,7 +37,7 @@ public static class MqttDataPublishExtensions
 
         var json = MqttDTO.SerializeEnvelope(envelope);
         var bytes = Encoding.UTF8.GetBytes(json);
-        return manager.PublishAsync(topic, bytes, ct: ct);
+        return manager.PublishAsync(topic, bytes, qos, retain, ct);
     }
 
     /// <summary>
@@ -45,6 +48,8 @@ public static class MqttDataPublishExtensions
         this MqttClientManager manager,
         string topic,
         IEnumerable<MqttDataItem> items,
+        MqttQualityOfServiceLevel qos = MqttQualityOfServiceLevel.AtMostOnce,
+        bool retain = false,
         CancellationToken ct = default)
     {
         if (items == null)
@@ -59,7 +64,7 @@ public static class MqttDataPublishExtensions
             Items = new List<MqttDataItem>(items)
         };
 
-        return PublishDataAsync(manager, topic, envelope, ct);
+        return PublishDataAsync(manager, topic, envelope, qos, retain, ct);
     }
 
     /// <summary>
@@ -70,6 +75,8 @@ public static class MqttDataPublishExtensions
         this MqttClientManager manager,
         MqttDataRepository repository,
         string topic = null,
+        MqttQualityOfServiceLevel qos = MqttQualityOfServiceLevel.AtMostOnce,
+        bool retain = false,
         CancellationToken ct = default)
     {
         if (repository == null)
@@ -79,7 +86,7 @@ public static class MqttDataPublishExtensions
         }
 
         var targetTopic = topic ?? repository.Topic;
-        return PublishDataAsync(manager, targetTopic, repository.GetSnapshot(), ct);
+        return PublishDataAsync(manager, targetTopic, repository.GetSnapshot(), qos, retain, ct);
     }
 
     /// <summary>
@@ -90,6 +97,8 @@ public static class MqttDataPublishExtensions
         this MqttClientManager manager,
         string topic,
         IReadOnlyDictionary<string, MqttDataEntry> data,
+        MqttQualityOfServiceLevel qos = MqttQualityOfServiceLevel.AtMostOnce,
+        bool retain = false,
         CancellationToken ct = default)
     {
         if (data == null)
@@ -117,7 +126,7 @@ public static class MqttDataPublishExtensions
             Items = items
         };
 
-        return PublishDataAsync(manager, topic, envelope, ct);
+        return PublishDataAsync(manager, topic, envelope, qos, retain, ct);
     }
 
     /// <summary>
@@ -128,6 +137,8 @@ public static class MqttDataPublishExtensions
         this MqttClientManager manager,
         string topic,
         IReadOnlyDictionary<string, object> data,
+        MqttQualityOfServiceLevel qos = MqttQualityOfServiceLevel.AtMostOnce,
+        bool retain = false,
         CancellationToken ct = default)
     {
         if (data == null)
@@ -148,7 +159,7 @@ public static class MqttDataPublishExtensions
             Items = items
         };
 
-        return PublishDataAsync(manager, topic, envelope, ct);
+        return PublishDataAsync(manager, topic, envelope, qos, retain, ct);
     }
 
     /// <summary>
@@ -160,6 +171,8 @@ public static class MqttDataPublishExtensions
         string topic,
         string name,
         object value,
+        MqttQualityOfServiceLevel qos = MqttQualityOfServiceLevel.AtMostOnce,
+        bool retain = false,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -177,6 +190,6 @@ public static class MqttDataPublishExtensions
             }
         };
 
-        return PublishDataAsync(manager, topic, envelope, ct);
+        return PublishDataAsync(manager, topic, envelope, qos, retain, ct);
     }
 }
