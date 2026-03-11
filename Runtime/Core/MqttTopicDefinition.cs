@@ -4,6 +4,18 @@ using System.Reflection;
 /// MQTTトピックのデータスキーマを定義する抽象基底クラス。
 /// 継承クラスで <see cref="TopicPath"/> とデータフィールド（<see cref="MqttField{T}"/>）を定義する。
 /// </summary>
+/// <remarks>
+/// <see cref="MqttField{T}"/> は必ず <b>public readonly フィールド</b>として定義してください。
+/// プロパティとして定義した場合、リフレクションによるバインド処理がスキップされ、
+/// データの受け取りに失敗します（コンパイルエラーにはなりません）。
+/// <code>
+/// // OK
+/// public readonly MqttField&lt;float&gt; Speed = new("Speed");
+///
+/// // NG — 無言でバインドされずデータが取得できない
+/// public MqttField&lt;float&gt; Speed { get; } = new("Speed");
+/// </code>
+/// </remarks>
 /// <example>
 /// <code>
 /// public class PlcDevice1Topic : MqttTopicDefinition

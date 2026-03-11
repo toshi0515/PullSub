@@ -1,7 +1,8 @@
 # Unity MQTT Client
 
 Unity Package Manager 対応の最小限 MQTT 送受信パッケージ。  
-[MQTTnet](https://github.com/dotnet/MQTTnet) v3.1.2 を使用し、Unity メインスレッドへの自動ディスパッチに対応。
+[MQTTnet](https://github.com/dotnet/MQTTnet) v3.1.2 を使用。
+通信処理はバックグラウンドで行われ、メインスレッドへのディスパッチは利用者が明示的に制御できる設計です。
 
 ## 特徴
 
@@ -9,7 +10,7 @@ Unity Package Manager 対応の最小限 MQTT 送受信パッケージ。
 - **マルチトピック対応**: トピックごとに独立した `MqttDataRepository` を生成
 - **高精度タイムスタンプ**: 各データアイテムごとに「送信元生成時刻」と「Unity 受信時刻」を保持
 - **柔軟な Publish**: 汎用 JSON、PLC コマンド、および Subscribe 互換形式でのデータ送信に対応
-- **スレッド安全**: メッセージ受信は自動的に Unity メインスレッドにディスパッチ
+- **スレッドモデルの最適化**: 通信・内部パースはすべてバックグラウンドで処理され、メインスレッドへの不要なコンテキストスイッチを最小化
 
 ## 前提条件
 
@@ -19,7 +20,8 @@ Unity Package Manager 対応の最小限 MQTT 送受信パッケージ。
 パッケージ導入前に、`Packages/manifest.json` の `dependencies` に以下を追加してください:
 
 ```json
-"com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask"
+"com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
+"com.cysharp.r3": "https://github.com/Cysharp/R3.git?path=src/R3.Unity/Assets/R3.Unity"
 ```
 
 ## 導入方法
@@ -39,7 +41,7 @@ https://github.com/Toshi-0515/unity-mqtt.git
 ### 1. トピック定義を作成する
 
 受信したいトピックのデータスキーマを `MqttTopicDefinition` を継承して定義します。  
-`MqttField<T>` のフィールド名は、受信する JSON ペイロードの `"name"` と一致させてください。
+`MqttField<T>` はpublic readonlyにしてフィールド名は、受信する JSON ペイロードの `"name"` と一致させてください。
 
 ```csharp
 public class PlcDevice1Topic : MqttTopicDefinition
@@ -54,7 +56,7 @@ public class PlcDevice1Topic : MqttTopicDefinition
 
 ### 2. 受信のセットアップ
 
-`MqttSubscriberBridge` コンポーネントをアタッチし、インスペクターでブローカー IP と購読したいトピックのリスト（`Topics`）を設定します。
+`MqttBridge` コンポーネントをアタッチし、インスペクターでブローカー IP と購読したいトピックのリスト（`Topics`）を設定します。
 
 トピック文字列（例: `"plc/device1"`）は、定義クラスの `TopicPath` と一致させてください。
 
@@ -63,7 +65,7 @@ public class PlcDevice1Topic : MqttTopicDefinition
 `store.GetTopic<T>()` で型安全なトピックインスタンスを取得し、フィールドにアクセスします。
 
 ```csharp
-var store = MqttSubscriberBridge.Instance.Store;
+var store = MqttBridge.Instance.Store;
 var topic = store.GetTopic<PlcDevice1Topic>();
 
 // 値のみを取得
@@ -91,14 +93,14 @@ if (entry != null)
 Subscribe 側と同じ形式（`MqttDataEnvelope`）でデータを送信します。
 
 ```csharp
-var manager = MqttSubscriberBridge.Instance.Manager;
+var manager = MqttBridge.Instance.Manager;
 
 // 単一値の送信
 await manager.PublishDataAsync("unity/data", "Status", "Running");
 
 // 特定のトピックの内容をそのままミラー送信
 var topic = store.GetTopic<PlcDevice1Topic>();
-await manager.PublishDataAsync(topic.Repository, targetTopic: "cloud/mirror");
+await manager.PublishDataAsync(topic.Repository, topic: "cloud/mirror");
 ```
 
 ### 5. PLC コマンド送信
@@ -114,10 +116,10 @@ await manager.PublishStopAsync("motor/cmd");
 graph TD
     %% ----- スターター & ライフサイクル層 -----
     subgraph Unity Environment
-        Bridge["MqttSubscriberBridge <br> (MonoBehaviour / Singleton)"]
+        Bridge["MqttBridge <br> (MonoBehaviour / Singleton)"]
         
         %% ライフサイクルイベント
-        UnityEvents(Awake / OnEnable / OnDisable) -. "Initialize / Cleanup" .-> Bridge
+        UnityEvents(Awake / OnEnable / OnDisable / OnDestroy) -. "Initialize / Cleanup / Dispose" .-> Bridge
     end
 
     %% ----- コア通信層 -----
@@ -166,20 +168,27 @@ graph TD
 
 ### 0. コア API (`MqttClientManager`)
 
-本ライブラリの通信の核となるクラスです。MQTTnet の複雑な設定やスレッド管理を隠蔽し、基本となる Subscribe / Publish メソッドを提供します。以下は拡張メソッドを使わずに直接コア機能を利用する場合の例です。
+本ライブラリの通信の核となるクラスです。MQTTnet の複雑な設定を隠蔽し、スレッド管理は上位レイヤーに委譲する設計で、基本となる Subscribe / Publish メソッドを提供します。以下は拡張メソッドを使わずに直接コア機能を利用する場合の例です。
 
 #### `SubscribeAsync`
-指定したトピックを購読します。データを受信すると、自動的に Unity のメインスレッドにディスパッチされた上でコールバック（ハンドラー）が呼ばれます。
+指定したトピックを購読します。データを受信すると、バックグラウンドスレッドでハンドラーが呼ばれます。
+
+> [!NOTE]
+> 現在の `SubscribeAsync` は完全一致トピックのみをサポートしています。`sensor/#` や `sensor/+` のようなワイルドカード購読は未実装です。
 
 ```csharp
-var manager = MqttSubscriberBridge.Instance.Manager;
+var manager = MqttBridge.Instance.Manager;
 
-// "sensor/#" などのトピックを購読し、独自の受信処理を定義する
-await manager.SubscribeAsync("sensor/#", (topic, payloadBytes) =>
+// 完全一致するトピックを購読し、独自の受信処理を定義する
+await manager.SubscribeAsync("sensor/temp", (topic, payloadBytes) =>
 {
-    // メインスレッドで実行されるため、UI操作等も安全に行える
-    var text = System.Text.Encoding.UTF8.GetString(payloadBytes);
-    Debug.Log($"[Received] {topic}: {text}");
+    // メニューやUI（Unity MainThread）などを操作する場合は
+    // UniTask.Post() 等を用いてコンテキストを切り替えてください
+    UniTask.Post(() =>
+    {
+        var text = System.Text.Encoding.UTF8.GetString(payloadBytes);
+        Debug.Log($"[Received] {topic}: {text}");
+    });
 });
 ```
 
@@ -203,15 +212,18 @@ await manager.PublishAsync(
 `MqttDataEnvelope` （タイムスタンプとアイテムリストを持つ標準 JSON フォーマット）として送られてくるデータを受信し、状態管理システムへ流し込みます。
 
 #### `SubscribeDataTopicAsync`
-指定したトピックを購読し、受信した MQTT メッセージをパースして自動的に `MqttDataStore` へ反映させます。
+指定したトピックを購読し、受信した MQTT メッセージをパースして自動的に `MqttDataStore` へ反映させます。内部リポジトリはスレッドセーフ（lock保護）なため安全にバックグラウンドで処理されます。
 
 ```csharp
-var manager = MqttSubscriberBridge.Instance.Manager;
-var store = MqttSubscriberBridge.Instance.Store;
+var manager = MqttBridge.Instance.Manager;
+var store = MqttBridge.Instance.Store;
 
 // "plc/device1" トピックの購読を開始
 await manager.SubscribeDataTopicAsync("plc/device1", store);
 ```
+
+> [!WARNING]
+> 受信イベントフックでUnityメインスレッドなどへのアクセスが必要な場合は、利用者側で処理をディスパッチしてください。
 
 ### 2. データ送信用拡張メソッド (`MqttDataPublishExtensions`)
 
@@ -280,7 +292,7 @@ var topicData = store.GetTopic<PlcDevice1Topic>();
 await manager.PublishDataAsync(topicData.Repository);
 
 // トピック名を "cloud/device1_mirror" と上書きして送信
-await manager.PublishDataAsync(topicData.Repository, "cloud/device1_mirror");
+await manager.PublishDataAsync(topicData.Repository, topic: "cloud/device1_mirror");
 ```
 
 #### ⑥ `MqttDataEnvelope` を直接送信

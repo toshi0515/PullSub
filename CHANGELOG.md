@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.1.0] - 2026-03-07
+
+### Added
+- `MqttBridge` — 従来の `MqttSubscriberBridge` と `MqttPublisherBridge` を統合し、MQTT 接続を一元管理する単一のエントリポイントコンポーネントを追加
+
+### Changed
+- **[BREAKING]** `MqttSubscriberBridge` および `MqttPublisherBridge` を廃止・削除し、`MqttBridge` に一本化
+- **[BREAKING]** `MqttClientManager` の受信コールバック仕様を変更。従来は自動的に Unity メインスレッドにディスパッチしていましたが、.NET 汎用化のため MQTTnet のバックグラウンドスレッドでそのまま実行されるようになりました
+- **[BREAKING]** 上記に伴い `MqttSubscribeExtensions.SubscribeDataTopicAsync` 等の購読側において、受信データから Unity オブジェクト（UIなど）を直接操作する場合は、利用者側で `UniTask.Post`等を使用し明示的にコンテキストを切り替える構成に変更
+
 ## [2.0.0] - 2026-03-06
 
 ### Added
