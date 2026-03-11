@@ -44,7 +44,7 @@ public static class MqttSubscribeExtensions
             {
                 var payload = Encoding.UTF8.GetString(bytes);
 
-                if (MqttDTO.TryDeserializeData(payload, out var env, out var err))
+                if (manager.Serializer.TryDeserializeData(payload, out var env, out var err))
                 {
                     repository.UpdateFromEnvelope(env);
                     manager.Log($"MQTT data updated: topic={t}, items={env.Items?.Count ?? 0}");

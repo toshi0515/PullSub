@@ -1,5 +1,4 @@
 using MQTTnet.Protocol;
-using Newtonsoft.Json;
 using System.Text;
 using System.Threading;
 using Cysharp.Threading.Tasks;
@@ -26,7 +25,7 @@ public static class MqttPublishExtensions
             return;
         }
 
-        var json = JsonConvert.SerializeObject(payload);
+        var json = manager.Serializer.SerializeObject(payload);
         var bytes = Encoding.UTF8.GetBytes(json);
 
         await manager.PublishAsync(topic, bytes, qos, retain, ct);

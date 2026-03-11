@@ -2,7 +2,7 @@
   "name": "com.toshi0515.unity-mqtt",
   "version": "1.0.0",
   "displayName": "Unity MQTT Client",
-  "description": "Minimal MQTT publish/subscribe client for Unity using MQTTnet. Provides connection management, topic subscription with automatic main-thread dispatching, and command publishing.",
+  "description": "Unity MQTT client package using MQTTnet v3.1.2. Provides managed connection lifecycle, typed topic snapshots, timestamped data entries, and Publish/Subscribe helpers without built-in reactive or main-thread dispatch dependencies.",
   "unity": "6000.0",
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.1"

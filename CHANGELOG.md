@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.1.1]
+
+### Added
+- `IMqttSerializer` 抽象を追加し、`NewtonsoftMqttSerializer` を既定実装として導入
+- `MqttClientManager` のコンストラクタに optional serializer 引数を追加（manager 単位で差し替え可能）
+
+### Removed
+- **[BREAKING]** `StopAsync()` を削除。`ManagedMqttClient` が自動再接続を担うため、Unity アプリでの Stop → Restart パターンは不要と判断
+- **[BREAKING]** `ClientState.Stopped` を削除
+
+### Changed
+- `MqttClientManager` のライフサイクルを `NotStarted → Running → Disposed` の 3 フェーズに単純化。`_stateSemaphore` は `StartAsync` 多重実行防止のみに特化し、`Dispose` は `Interlocked` ラッチのみで保護
+- `MqttDataPublishExtensions` / `MqttPublishExtensions` / `MqttPlcCommandPublishExtensions` の JSON 変換経路を manager serializer 経由へ統一
+- `MqttSubscribeExtensions.SubscribeDataTopicAsync` の DTO 復元を manager serializer 経由へ置換
+- `MqttDTO.SerializeEnvelope` / `MqttDTO.TryDeserializeData` は互換 API として維持しつつ、既定 serializer への委譲実装へ変更
+- README を現行実装に合わせて更新し、ライブラリの責務範囲、設計方針、既知制約、手動検証の導線を明文化
+- R3 依存削除済みの現状に合わせて導入手順を修正し、UniTask のみを前提条件として記載
+- `package.json` の説明文を現行アーキテクチャに合わせて更新し、型安全なトピックスナップショットとタイムスタンプ付きデータモデルを説明に反映
+
 ## [2.1.0] - 2026-03-07
 
 ### Added

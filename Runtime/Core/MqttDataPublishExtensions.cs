@@ -35,7 +35,7 @@ public static class MqttDataPublishExtensions
             return UniTask.CompletedTask;
         }
 
-        var json = MqttDTO.SerializeEnvelope(envelope);
+        var json = manager.Serializer.SerializeEnvelope(envelope);
         var bytes = Encoding.UTF8.GetBytes(json);
         return manager.PublishAsync(topic, bytes, qos, retain, ct);
     }

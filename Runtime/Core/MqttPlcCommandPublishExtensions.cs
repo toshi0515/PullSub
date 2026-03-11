@@ -67,7 +67,7 @@ public static class MqttPlcCommandPublishExtensions
             return;
         }
 
-        var json = JsonConvert.SerializeObject(payload);
+        var json = manager.Serializer.SerializeObject(payload);
         var bytes = Encoding.UTF8.GetBytes(json);
 
         await manager.PublishAsync(topic, bytes, MqttQualityOfServiceLevel.AtMostOnce, false, ct);

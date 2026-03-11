@@ -12,55 +12,24 @@ using System.Threading.Tasks;
 
 /// <summary>
 /// MQTT クライアント統一管理。
-/// public コンストラクタでインスタンスを生成し、StartAsync で接続する。
+/// public コンストラクタでインスタンスを生成し、StartAsync で接続開始する。
 /// メッセージハンドラーは MQTTnet のバックグラウンドスレッドで実行される。
 /// Unity オブジェクトへのアクセスが必要な場合は、呼び出し側で UniTask.Post() 等を用い
 /// メインスレッドに切り替えてください。
 /// </summary>
 /// <remarks>
-/// ライフサイクルは以下の4状態で管理される:
-/// <code>
-/// NotStarted ──StartAsync──▶ Running ──StopAsync──▶ Stopped
-///                               ▲                       │
-///                               └──────StartAsync───────┘
-///                                    （再起動可能）
-///
-/// いずれの状態からも Dispose/DisposeAsync → Disposed（終端・復帰不可）
-/// </code>
-/// Running 状態でのネットワーク切断は ManagedMqttClient が自動再接続する。
-/// Stopped / Disposed 状態での Publish/Subscribe は例外をスローする。
+/// 購読状態の管理は ManagedMqttClient に委譲する。
+/// SubscribeAsync は StartAsync 前でも呼び出せ、ManagedMqttClient の内部キューに積まれる。
+/// PublishAsync は接続開始後にのみ許可し、Dispose/DisposeAsync は進行中の操作を即座にキャンセルする。
 /// </remarks>
 public sealed class MqttClientManager : IDisposable, IAsyncDisposable
 {
-    // ========= ライフサイクル状態 =========
-
-    private enum ClientState { NotStarted, Running, Stopped, Disposed }
-
-    private readonly struct RunningOperationContext
-    {
-        public RunningOperationContext(IManagedMqttClient client, CancellationToken lifetimeToken)
-        {
-            Client = client;
-            LifetimeToken = lifetimeToken;
-        }
-
-        public IManagedMqttClient Client { get; }
-        public CancellationToken LifetimeToken { get; }
-    }
-
-    private ClientState _state = ClientState.NotStarted;
-    private readonly object _stateLock = new object();
-
     /// <summary>
-    /// HandleMessageReceived からスレッドセーフに参照するための volatile フラグ。
-    /// lock なしで安全に読み取れるよう、_state の変更と同時に更新する。
+    /// StartAsync の多重実行を直列化するセマフォ。
+    /// CoreDisposeAsync は _client を破棄する前にこのセマフォを取得し、
+    /// StartAsync が _client を使用中でないことを保証する。
     /// </summary>
-    private volatile bool _isRunning = false;
-
-    /// <summary>
-    /// StartAsync / StopAsync の多重実行を防ぐセマフォ。
-    /// </summary>
-    private readonly SemaphoreSlim _stateSemaphore = new SemaphoreSlim(1, 1);
+    private readonly SemaphoreSlim _startSemaphore = new SemaphoreSlim(1, 1);
 
     /// <summary>
     /// Dispose の多重実行を防ぐラッチ（0: 未実行, 1: 実行済み）。
@@ -68,24 +37,33 @@ public sealed class MqttClientManager : IDisposable, IAsyncDisposable
     /// </summary>
     private int _disposeGuard = 0;
 
+    /// <summary>
+    /// Dispose 済みかどうかを lock なしで参照するためのフラグ。
+    /// </summary>
+    private volatile bool _disposed = false;
+
     // ========= プロパティ =========
 
     public string BrokerIp { get; private set; }
     public int BrokerPort { get; private set; }
 
     /// <summary>ブローカーへの物理的な TCP 接続状態。</summary>
-    public bool IsConnected => _client?.IsConnected == true;
+    public bool IsConnected => !_disposed && _client.IsConnected;
 
-    /// <summary>クライアントが Running 状態かどうか。</summary>
-    public bool IsStarted { get { lock (_stateLock) return _state == ClientState.Running; } }
+    /// <summary>クライアントの起動要求が完了しているかどうか。</summary>
+    public bool IsStarted => !_disposed && _client.IsStarted;
+
+    /// <summary>Publish/Subscribe 拡張で利用するシリアライザ。</summary>
+    public IMqttSerializer Serializer => _serializer;
 
     // ========= 内部フィールド =========
 
-    private IManagedMqttClient _client;
+    private readonly IManagedMqttClient _client;
+    private readonly IMqttSerializer _serializer;
 
     /// <summary>
-    /// StartAsync で生成し StopAsync/Dispose でキャンセル・破棄する寿命トークン。
-    /// Running 状態の間のみ有効。
+    /// StartAsync で生成し Dispose でキャンセル・破棄する寿命トークン。
+    /// PublishAsync 等の進行中処理を Dispose で即座に止めるために使う。
     /// </summary>
     private CancellationTokenSource _lifetimeCts;
 
@@ -108,7 +86,8 @@ public sealed class MqttClientManager : IDisposable, IAsyncDisposable
         int brokerPort,
         Action<string> log = null,
         Action<string> logError = null,
-        Action<Exception, string, bool> logException = null)
+        Action<Exception, string, bool> logException = null,
+        IMqttSerializer serializer = null)
     {
         // IPAddress.TryParse はホスト名（"mqtt.factory.local" 等）を拒否するため、
         // 空でないかどうかだけをチェックする。
@@ -118,6 +97,23 @@ public sealed class MqttClientManager : IDisposable, IAsyncDisposable
         if (log != null) _log = log;
         if (logError != null) _logError = logError;
         if (logException != null) _logException = logException;
+
+        _serializer = serializer ?? MqttSerializerDefaults.Default;
+
+        var factory = new MqttFactory();
+        _client = factory.CreateManagedMqttClient();
+
+        _client.ConnectedHandler = new MqttClientConnectedHandlerDelegate(_ =>
+            _log?.Invoke("[MQTT] Connected."));
+
+        _client.DisconnectedHandler = new MqttClientDisconnectedHandlerDelegate(e =>
+        {
+            _log?.Invoke($"[MQTT] Disconnected: Reason={e.Reason}");
+            if (e.Exception != null)
+                _logException?.Invoke(e.Exception, "Disconnected", false);
+        });
+
+        _client.UseApplicationMessageReceivedHandler(HandleMessageReceived);
     }
 
     // ========= ログ API =========
@@ -131,65 +127,37 @@ public sealed class MqttClientManager : IDisposable, IAsyncDisposable
 
     /// <summary>
     /// MQTT クライアントを起動する。
-    /// NotStarted および Stopped 状態から呼び出し可能。
-    /// Stopped からの再起動時は既存の ManagedMqttClient インスタンスを再利用する。
+    /// 既に起動済みの場合の再呼び出しは no-op。
     /// </summary>
     /// <exception cref="ObjectDisposedException">Disposed 状態で呼ばれた場合。</exception>
     public async UniTask StartAsync(CancellationToken ct = default)
     {
         ThrowIfDisposed();
-        await _stateSemaphore.WaitAsync(ct);
+        await _startSemaphore.WaitAsync(ct);
+        CancellationTokenSource lifetimeCts = null;
         try
         {
-            ClientState previousState;
+            ThrowIfDisposed();
 
-            // セマフォ取得後に再チェック（Dispose との競合を考慮）
-            lock (_stateLock)
+            if (_client.IsStarted)
             {
-                if (_state == ClientState.Disposed)
-                    throw new ObjectDisposedException(nameof(MqttClientManager));
-                if (_state == ClientState.Running)
-                {
-                    _log?.Invoke("[MQTT] Already running.");
-                    return;
-                }
-                // NotStarted または Stopped から進む
-
-                previousState = _state;
+                _log?.Invoke("[MQTT] Already running.");
+                return;
             }
 
-            _lifetimeCts?.Cancel();
-            _lifetimeCts?.Dispose();
-            _lifetimeCts = new CancellationTokenSource();
-            var lifetimeToken = _lifetimeCts.Token;
+            lifetimeCts = new CancellationTokenSource();
+            var lifetimeToken = lifetimeCts.Token;
+            var previousLifetimeCts = Interlocked.Exchange(ref _lifetimeCts, lifetimeCts);
+            previousLifetimeCts?.Cancel();
+            previousLifetimeCts?.Dispose();
+
+            ThrowIfDisposed();
 
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken, ct);
             var startToken = linked.Token;
 
             try
             {
-                // 初回のみクライアントを生成。Stop → Start の再起動時は再利用する。
-                // ハンドラーはクライアントインスタンスに紐づくため再登録不要。
-                if (_client == null)
-                {
-                    var factory = new MqttFactory();
-                    _client = factory.CreateManagedMqttClient();
-
-                    _client.ConnectedHandler = new MqttClientConnectedHandlerDelegate(_ =>
-                        _log?.Invoke("[MQTT] Connected."));
-
-                    _client.DisconnectedHandler = new MqttClientDisconnectedHandlerDelegate(e =>
-                    {
-                        // Running 中のネットワーク切断は ManagedMqttClient が自動再接続するため、
-                        // ここでは状態を変更しない（_isRunning は true のまま）。
-                        _log?.Invoke($"[MQTT] Disconnected: Reason={e.Reason}");
-                        if (e.Exception != null)
-                            _logException?.Invoke(e.Exception, "Disconnected", false);
-                    });
-
-                    _client.UseApplicationMessageReceivedHandler(e => HandleMessageReceived(e));
-                }
-
                 var clientId = $"UnityMqttClient_{Guid.NewGuid():N}";
                 var options = new MqttClientOptionsBuilder()
                     .WithClientId(clientId)
@@ -202,40 +170,28 @@ public sealed class MqttClientManager : IDisposable, IAsyncDisposable
                     .WithAutoReconnectDelay(TimeSpan.FromSeconds(5))
                     .Build();
 
-                var client = _client;
-                await AwaitWithCancellation(client.StartAsync(managedOptions).AsUniTask(), startToken);
-                await SubscribeAllRegisteredTopicsAsync(new RunningOperationContext(client, lifetimeToken), startToken);
+                await AwaitWithCancellation(_client.StartAsync(managedOptions).AsUniTask(), startToken);
 
                 startToken.ThrowIfCancellationRequested();
-                lock (_stateLock)
-                {
-                    if (_state == ClientState.Disposed)
-                    {
-                        startToken.ThrowIfCancellationRequested();
-                        throw new ObjectDisposedException(nameof(MqttClientManager));
-                    }
-
-                    _state = ClientState.Running;
-                    _isRunning = true;
-                }
+                ThrowIfDisposed();
 
                 _log?.Invoke($"[MQTT] Client started {BrokerIp}:{BrokerPort}");
             }
             catch (OperationCanceledException)
             {
-                await RollbackFailedStartAsync(previousState, "StartAsync canceled");
+                await CleanupFailedStartAsync(lifetimeCts);
                 throw;
             }
             catch (Exception ex)
             {
-                await RollbackFailedStartAsync(previousState, "StartAsync rollback failed");
+                await CleanupFailedStartAsync(lifetimeCts);
                 _logException?.Invoke(ex, "StartAsync error", true);
                 throw;
             }
         }
         finally
         {
-            _stateSemaphore.Release();
+            _startSemaphore.Release();
         }
     }
 
@@ -247,10 +203,7 @@ public sealed class MqttClientManager : IDisposable, IAsyncDisposable
     {
         try
         {
-            // volatile フラグによるスレッドセーフな早期終了チェック。
-            // _lifetimeCts への直接アクセスを避けることで、
-            // StopAsync/Dispose との競合による NullReferenceException を防ぐ。
-            if (!_isRunning) return;
+            if (_disposed) return;
 
             var topic = e.ApplicationMessage?.Topic ?? string.Empty;
             var bytes = e.ApplicationMessage?.Payload ?? Array.Empty<byte>();
@@ -278,67 +231,11 @@ public sealed class MqttClientManager : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// MQTT クライアントを一時停止する。
-    /// StartAsync で再起動可能。ManagedMqttClient インスタンスは破棄せず再利用できる。
-    /// </summary>
-    /// <exception cref="ObjectDisposedException">Disposed 状態で呼ばれた場合。</exception>
-    public async UniTask StopAsync(CancellationToken ct = default)
-    {
-        ThrowIfDisposed();
-        await _stateSemaphore.WaitAsync(ct);
-        try
-        {
-            IManagedMqttClient client = null;
-            CancellationTokenSource lifetimeCts = null;
-
-            lock (_stateLock)
-            {
-                if (_state == ClientState.Disposed)
-                    throw new ObjectDisposedException(nameof(MqttClientManager));
-                if (_state != ClientState.Running)
-                {
-                    _log?.Invoke("[MQTT] Not running, nothing to stop.");
-                    return;
-                }
-                // Stopped へ遷移（セマフォ保持中なので競合なし）
-                _state = ClientState.Stopped;
-                client = _client;
-                lifetimeCts = _lifetimeCts;
-                _lifetimeCts = null;
-            }
-
-            // _isRunning を先に false にして HandleMessageReceived の処理を止める
-            _isRunning = false;
-            lifetimeCts?.Cancel();
-
-            try
-            {
-                // _client は破棄しない（再起動時に再利用するため）
-                await StopClientWithTimeoutAsync(client, "[WARN] StopAsync: ManagedMqttClient.StopAsync timeout.");
-            }
-            catch (Exception ex)
-            {
-                _logException?.Invoke(ex, "StopAsync error", true);
-            }
-            finally
-            {
-                lifetimeCts?.Dispose();
-            }
-
-            _log?.Invoke("[MQTT] Client stopped.");
-        }
-        finally
-        {
-            _stateSemaphore.Release();
-        }
-    }
-
-    /// <summary>
     /// 指定トピックにメッセージを送信する。
-    /// Running 状態でのみ動作する。ネットワーク切断中は ManagedMqttClient が内部キューに積み、
+    /// StartAsync 完了後にのみ動作する。ネットワーク切断中は ManagedMqttClient が内部キューに積み、
     /// 再接続後に自動送信する（ManagedMqttClient の責務）。
     /// </summary>
-    /// <exception cref="InvalidOperationException">Running 以外の状態で呼ばれた場合。</exception>
+    /// <exception cref="InvalidOperationException">StartAsync 前に呼ばれた場合。</exception>
     /// <exception cref="ObjectDisposedException">Disposed 状態で呼ばれた場合。</exception>
     public async UniTask PublishAsync(
         string topic,
@@ -347,9 +244,30 @@ public sealed class MqttClientManager : IDisposable, IAsyncDisposable
         bool retain = false,
         CancellationToken ct = default)
     {
-        // 自動再接続は ManagedMqttClient の責務のため、ここでは EnsureConnectedAsync を呼ばない。
-        // 利用者が明示的に Stop した場合は例外をスローし、意図しない再接続を防ぐ。
-        var context = GetRequiredRunningOperationContext("publish");
+        ThrowIfDisposed();
+
+        if (!_client.IsStarted)
+            throw new InvalidOperationException("Cannot publish: client is not started. Call StartAsync first.");
+
+        var lifetimeCts = _lifetimeCts;
+        if (lifetimeCts == null)
+            throw new InvalidOperationException("Cannot publish: client is not started. Call StartAsync first.");
+
+        CancellationToken lifetimeToken;
+        try
+        {
+            lifetimeToken = lifetimeCts.Token;
+        }
+        catch (ObjectDisposedException) when (_disposed)
+        {
+            throw new ObjectDisposedException(nameof(MqttClientManager));
+        }
+        catch (ObjectDisposedException)
+        {
+            // Dispose/cleanup 競合で寿命 CTS が破棄済みになったケースは
+            // 想定内のライフサイクル遷移として InvalidOperation で返す。
+            throw new InvalidOperationException("Cannot publish: client is not started. Call StartAsync first.");
+        }
 
         var message = new MqttApplicationMessageBuilder()
             .WithTopic(topic)
@@ -360,11 +278,15 @@ public sealed class MqttClientManager : IDisposable, IAsyncDisposable
 
         try
         {
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(context.LifetimeToken, ct);
-            await AwaitWithCancellation(context.Client.PublishAsync(message).AsUniTask(), linked.Token);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken, ct);
+            await AwaitWithCancellation(_client.PublishAsync(message).AsUniTask(), linked.Token);
             _log?.Invoke($"[PUB] topic={topic}, size={payload?.Length ?? 0}");
         }
         catch (OperationCanceledException) { throw; }
+        catch (ObjectDisposedException) when (_disposed)
+        {
+            throw new ObjectDisposedException(nameof(MqttClientManager));
+        }
         catch (Exception ex)
         {
             _logException?.Invoke(ex, "PublishAsync failed", true);
@@ -374,14 +296,8 @@ public sealed class MqttClientManager : IDisposable, IAsyncDisposable
 
     /// <summary>
     /// 指定トピックを購読する。
-    /// <para>
-    /// 【2フェーズ処理】<br/>
-    /// ① ハンドラー登録（同期・即時完了）<br/>
-    /// ② ネットワーク購読（非同期・Running 時のみ実行）<br/>
-    /// Running 以外の状態では①のみ実行し、StartAsync 後に SubscribeAllRegisteredTopicsAsync が②を自動実行する。<br/>
-    /// ①と②の間には非原子な窓が存在するが、①→②の順序により
-    /// 「ハンドラーなしでメッセージを受信する」事態を防ぐ安全側の順序を保つ。
-    /// </para>
+    /// ハンドラー登録を同期的に完了させた後、購読要求を ManagedMqttClient に委譲する。
+    /// StartAsync 前でも呼び出し可能で、未接続時は ManagedMqttClient の内部キューに積まれる。
     /// </summary>
     /// <exception cref="ObjectDisposedException">Disposed 状態で呼ばれた場合。</exception>
     public async UniTask SubscribeAsync(
@@ -396,24 +312,35 @@ public sealed class MqttClientManager : IDisposable, IAsyncDisposable
         if (handler != null)
             SetMessageHandler(topic, handler);
 
-        // ② トピック登録（新規の場合のみネットワーク購読へ進む）
-        bool added;
-        lock (_topicLock) { added = _subscribedTopics.Add(topic); }
+        lock (_topicLock) { _subscribedTopics.Add(topic); }
 
-        if (!added)
+        CancellationTokenSource linked = null;
+        try
         {
-            _log?.Invoke($"Topic already subscribed: {topic}");
-            return;
-        }
+            var operationToken = CreateOperationToken(ct, out linked);
 
-        if (!TryGetRunningOperationContext(out var context))
+            var topicFilter = new MqttTopicFilterBuilder()
+                .WithTopic(topic)
+                .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtMostOnce)
+                .Build();
+
+            await AwaitWithCancellation(_client.SubscribeAsync(topicFilter).AsUniTask(), operationToken);
+            _log?.Invoke($"Subscribed to topic: {topic}");
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (ObjectDisposedException) when (_disposed)
         {
-            _log?.Invoke($"Topic registered (will subscribe on connect): {topic}");
-            return;
+            throw new ObjectDisposedException(nameof(MqttClientManager));
         }
-
-        // ③ ネットワーク購読（Running 時のみ）
-        await SubscribeToTopicAsync(context, topic, ct);
+        catch (Exception ex)
+        {
+            _logException?.Invoke(ex, $"Failed to subscribe to {topic}", true);
+            throw;
+        }
+        finally
+        {
+            linked?.Dispose();
+        }
     }
 
     /// <summary>
@@ -425,26 +352,29 @@ public sealed class MqttClientManager : IDisposable, IAsyncDisposable
         if (string.IsNullOrWhiteSpace(topic)) return;
         ThrowIfDisposed();
 
-        lock (_topicLock)
-        {
-            if (!_subscribedTopics.Remove(topic)) return;
-        }
-
         RemoveMessageHandler(topic);
+        lock (_topicLock) { _subscribedTopics.Remove(topic); }
 
-        if (!TryGetRunningOperationContext(out var context)) return;
-
+        CancellationTokenSource linked = null;
         try
         {
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(context.LifetimeToken, ct);
-            await AwaitWithCancellation(context.Client.UnsubscribeAsync(topic).AsUniTask(), linked.Token);
+            var operationToken = CreateOperationToken(ct, out linked);
+            await AwaitWithCancellation(_client.UnsubscribeAsync(topic).AsUniTask(), operationToken);
             _log?.Invoke($"Unsubscribed from topic: {topic}");
         }
         catch (OperationCanceledException) { throw; }
+        catch (ObjectDisposedException) when (_disposed)
+        {
+            throw new ObjectDisposedException(nameof(MqttClientManager));
+        }
         catch (Exception ex)
         {
             _logException?.Invoke(ex, $"Failed to unsubscribe from {topic}", true);
             throw;
+        }
+        finally
+        {
+            linked?.Dispose();
         }
     }
 
@@ -512,24 +442,26 @@ public sealed class MqttClientManager : IDisposable, IAsyncDisposable
     {
         // Interlocked.Exchange でアトミックに多重実行を防ぐ
         if (Interlocked.Exchange(ref _disposeGuard, 1) == 1) return false;
-
-        CancellationTokenSource lifetimeCts = null;
-        lock (_stateLock)
-        {
-            _state = ClientState.Disposed;
-            lifetimeCts = _lifetimeCts;
-            _lifetimeCts = null;
-        }
-        // volatile フラグを即時 false にして HandleMessageReceived の処理を止める
-        _isRunning = false;
-        // 進行中の非同期操作をキャンセル
-        lifetimeCts?.Cancel();
-        lifetimeCts?.Dispose();
+        _disposed = true;
         return true;
     }
 
     private async UniTask CoreDisposeAsync()
     {
+        // ① 進行中の操作を即座にキャンセル
+        var lifetimeCts = Interlocked.Exchange(ref _lifetimeCts, null);
+        lifetimeCts?.Cancel();
+        lifetimeCts?.Dispose();
+
+        // ② StartAsync が _client を使用中でないことを保証してから破棄する。
+        // ①で CTS をキャンセル済みのため、StartAsync は速やかにセマフォを解放する。
+        try
+        {
+            if (await _startSemaphore.WaitAsync(5000))
+                _startSemaphore.Release();
+        }
+        catch { /* セマフォが既に破棄済み等 — 続行 */ }
+
         try
         {
             await StopClientWithTimeoutAsync(_client, "[WARN] DisposeAsync: StopAsync timeout.");
@@ -540,9 +472,7 @@ public sealed class MqttClientManager : IDisposable, IAsyncDisposable
         }
         finally
         {
-            _client?.Dispose();
-            _client = null;
-            _stateSemaphore.Dispose();
+            _client.Dispose();
             _log?.Invoke("[MQTT] Client disposed.");
         }
     }
@@ -554,108 +484,53 @@ public sealed class MqttClientManager : IDisposable, IAsyncDisposable
     /// <summary>Disposed 状態であれば ObjectDisposedException をスローする。</summary>
     private void ThrowIfDisposed()
     {
-        // _disposeGuard は volatile 相当の保証を Interlocked が提供する
-        if (_disposeGuard == 1)
+        if (_disposed)
             throw new ObjectDisposedException(nameof(MqttClientManager));
     }
 
-    private RunningOperationContext GetRequiredRunningOperationContext(string operationName)
+    private CancellationToken CreateOperationToken(CancellationToken ct, out CancellationTokenSource linkedCts)
     {
-        lock (_stateLock)
+        var lifetimeCts = _lifetimeCts;
+        if (lifetimeCts == null)
         {
-            if (_state == ClientState.Disposed)
-                throw new ObjectDisposedException(nameof(MqttClientManager));
-            if (_state != ClientState.Running)
-                throw new InvalidOperationException(
-                    $"Cannot {operationName}: client is {_state}. Call StartAsync first.");
-            if (_client == null || _lifetimeCts == null)
-                throw new OperationCanceledException($"Cannot {operationName}: client is shutting down.");
-
-            return new RunningOperationContext(_client, _lifetimeCts.Token);
+            linkedCts = null;
+            return ct;
         }
-    }
-
-    private bool TryGetRunningOperationContext(out RunningOperationContext context)
-    {
-        lock (_stateLock)
-        {
-            if (_state == ClientState.Disposed)
-                throw new ObjectDisposedException(nameof(MqttClientManager));
-            if (_state != ClientState.Running || _client == null || _lifetimeCts == null)
-            {
-                context = default;
-                return false;
-            }
-
-            context = new RunningOperationContext(_client, _lifetimeCts.Token);
-            return true;
-        }
-    }
-
-    private async UniTask SubscribeAllRegisteredTopicsAsync(RunningOperationContext context, CancellationToken ct)
-    {
-        string[] topics;
-        lock (_topicLock)
-        {
-            topics = new string[_subscribedTopics.Count];
-            _subscribedTopics.CopyTo(topics);
-        }
-
-        foreach (var topic in topics)
-            await SubscribeToTopicAsync(context, topic, ct);
-    }
-
-    private async UniTask SubscribeToTopicAsync(RunningOperationContext context, string topic, CancellationToken ct)
-    {
-        try
-        {
-            var topicFilter = new MqttTopicFilterBuilder()
-                .WithTopic(topic)
-                .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtMostOnce)
-                .Build();
-
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(context.LifetimeToken, ct);
-            await AwaitWithCancellation(context.Client.SubscribeAsync(topicFilter).AsUniTask(), linked.Token);
-            _log?.Invoke($"Subscribed to topic: {topic}");
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            _logException?.Invoke(ex, $"Failed to subscribe to {topic}", true);
-            throw;
-        }
-    }
-
-    private async UniTask RollbackFailedStartAsync(ClientState fallbackState, string rollbackErrorMessage)
-    {
-        IManagedMqttClient client;
-        CancellationTokenSource lifetimeCts;
-
-        lock (_stateLock)
-        {
-            client = _client;
-            lifetimeCts = _lifetimeCts;
-
-            if (_state != ClientState.Disposed)
-                _state = fallbackState;
-
-            _lifetimeCts = null;
-        }
-
-        _isRunning = false;
-        lifetimeCts?.Cancel();
 
         try
         {
-            await StopClientWithTimeoutAsync(client, "[WARN] StartAsync rollback: ManagedMqttClient.StopAsync timeout.");
+            linkedCts = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCts.Token, ct);
+        }
+        catch (ObjectDisposedException) when (_disposed)
+        {
+            throw new ObjectDisposedException(nameof(MqttClientManager));
+        }
+
+        return linkedCts.Token;
+    }
+
+    private async UniTask CleanupFailedStartAsync(CancellationTokenSource failedLifetimeCts)
+    {
+        if (failedLifetimeCts == null) return;
+
+        var ownsLifetime = Interlocked.CompareExchange(ref _lifetimeCts, null, failedLifetimeCts) == failedLifetimeCts;
+        if (ownsLifetime)
+            failedLifetimeCts.Cancel();
+
+        try
+        {
+            await StopClientWithTimeoutAsync(_client, "[WARN] StartAsync cleanup: ManagedMqttClient.StopAsync timeout.");
         }
         catch (Exception ex)
         {
-            _logException?.Invoke(ex, rollbackErrorMessage, false);
+            // Dispose との競合で _client が停止/破棄済みの可能性がある。
+            // CoreDisposeAsync がクリーンアップを引き継ぐため、ここでは吸収する。
+            _logException?.Invoke(ex, "StartAsync cleanup error", false);
         }
         finally
         {
-            lifetimeCts?.Dispose();
+            if (ownsLifetime)
+                failedLifetimeCts.Dispose();
         }
     }
 

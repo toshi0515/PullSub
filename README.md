@@ -4,6 +4,8 @@ Unity Package Manager 対応の最小限 MQTT 送受信パッケージ。
 [MQTTnet](https://github.com/dotnet/MQTTnet) v3.1.2 を使用。
 通信処理はバックグラウンドで行われ、メインスレッドへのディスパッチは利用者が明示的に制御できる設計です。
 
+本ライブラリは、Unity 上で取得済みのセンサーデータや装置状態を、決まったフォーマットで MQTT Publish / Subscribe し、扱いやすいスナップショットとして保持することに責務を限定しています。センサー SDK との接続や値の取得自体はライブラリ外で行う想定です。
+
 ## 特徴
 
 - **型安全なデータアクセス**: `MqttTopicDefinition` でトピックのデータスキーマを定義し、IDE 補完と型チェックを享受
@@ -11,6 +13,20 @@ Unity Package Manager 対応の最小限 MQTT 送受信パッケージ。
 - **高精度タイムスタンプ**: 各データアイテムごとに「送信元生成時刻」と「Unity 受信時刻」を保持
 - **柔軟な Publish**: 汎用 JSON、PLC コマンド、および Subscribe 互換形式でのデータ送信に対応
 - **スレッドモデルの最適化**: 通信・内部パースはすべてバックグラウンドで処理され、メインスレッドへの不要なコンテキストスイッチを最小化
+
+## 責務範囲
+
+本ライブラリが担当する範囲は以下です。
+
+```text
+センサー SDK / 装置ドライバ（ライブラリ外）
+    ↓
+シリアライズ・送受信・AoDT の基盤となるデータ保持（本ライブラリ）
+    ↓
+MQTT Broker
+```
+
+センサーの値取得方法はポーリング、コールバック、定時送信など機器ごとに異なるため、本ライブラリは「取得済みデータを送る」「受信データを扱いやすく保持する」部分に集中します。
 
 ## 前提条件
 
@@ -20,9 +36,11 @@ Unity Package Manager 対応の最小限 MQTT 送受信パッケージ。
 パッケージ導入前に、`Packages/manifest.json` の `dependencies` に以下を追加してください:
 
 ```json
-"com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
-"com.cysharp.r3": "https://github.com/Cysharp/R3.git?path=src/R3.Unity/Assets/R3.Unity"
+"com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask"
 ```
+
+> [!NOTE]
+> R3 依存は削除済みです。Reactive 拡張は本ライブラリには含まれません。
 
 ## 導入方法
 
@@ -36,7 +54,81 @@ Unity Package Manager 対応の最小限 MQTT 送受信パッケージ。
 https://github.com/Toshi-0515/unity-mqtt.git
 ```
 
-## 使い方
+## 設計と使い方
+
+### 現在の設計方針
+
+- `PublishDataAsync` 系オーバーロードは、センサーデータや装置状態を「今すぐ送る」ための基本 API として維持します
+- 受信データは `MqttDataStore` / `MqttDataRepository` にスナップショットとして保持し、呼び出し側は Unity メインスレッドから安全に読む構成を前提とします
+- `MqttDataEntry` は `SourceTimestampUtc` と `ReceivedUtc` を保持し、AoDT（Age of Digital Twin）研究へ拡張するための基盤として扱います
+- フィルタリングやリアクティブな送信制御はライブラリ本体ではなく、上位レイヤーまたは研究用の別実装で組み合わせる想定です
+
+### シリアライザ抽象化（Phase 2）
+
+- Core の Publish / Subscribe 経路は `IMqttSerializer` を通してシリアライズ・デシリアライズされます
+- 既定実装は `NewtonsoftMqttSerializer` です（従来の payload 互換を維持）
+- `MqttClientManager` のコンストラクタ末尾で serializer を注入できます（未指定時は既定実装）
+- `MqttDTO.SerializeEnvelope` / `MqttDTO.TryDeserializeData` は互換のために残しつつ、内部では既定 serializer に委譲します
+
+カスタム serializer を実装する場合は、以下の wire format 互換を維持してください。
+
+- `MqttDataEnvelope` のプロパティ名は `timestamp` / `items`
+- `MqttDataItem` のプロパティ名は `name` / `value`
+- `timestamp` は ISO8601 round-trip 形式（`o`）
+- 既存 `TryGetValue<T>()` と互換を保つため、数値は `long/double` 系として復元される挙動を想定
+
+カスタム serializer 注入例:
+
+```csharp
+public sealed class MySerializer : IMqttSerializer
+{
+    public string SerializeEnvelope(MqttDataEnvelope envelope)
+    {
+        return Newtonsoft.Json.JsonConvert.SerializeObject(envelope);
+    }
+
+    public bool TryDeserializeData(string payload, out MqttDataEnvelope envelope, out string error)
+    {
+        envelope = null;
+        error = null;
+        try
+        {
+            envelope = Newtonsoft.Json.JsonConvert.DeserializeObject<MqttDataEnvelope>(payload);
+            if (envelope == null)
+            {
+                error = "Deserialize returned null.";
+                return false;
+            }
+            return true;
+        }
+        catch (System.Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    public string SerializeObject<T>(T payload)
+    {
+        return Newtonsoft.Json.JsonConvert.SerializeObject(payload);
+    }
+}
+
+var manager = new MqttClientManager(
+    brokerIp: "127.0.0.1",
+    brokerPort: 1883,
+    serializer: new MySerializer());
+```
+
+### 現在の制約
+
+- `SubscribeAsync` は完全一致トピックのみをサポートします。`sensor/#` や `sensor/+` のようなワイルドカード購読は未実装です
+- メッセージハンドラーはバックグラウンドスレッドで呼ばれます。Unity API に触る場合は `UniTask.Post()` などでメインスレッドへ戻してください
+- `SubscribeAsync` / `SubscribeDataTopicAsync` に渡す `CancellationToken` はネットワーク購読のキャンセルに効きますが、登録済みハンドラーの解除は行いません。`OnDestroy` などで `RemoveMessageHandler()` を明示的に呼んでください
+
+### 手動検証
+
+Unity 側の回帰確認にはサンプルプロジェクト `MqttTest` を使用できます。ワークスペース内の `MqttTest/MANUAL_TESTS.md` に、正常起動、Publish / Subscribe、Play Mode 終了時の確認手順をまとめています。
 
 ### 1. トピック定義を作成する
 
@@ -228,6 +320,9 @@ await manager.SubscribeDataTopicAsync("plc/device1", store);
 ### 2. データ送信用拡張メソッド (`MqttDataPublishExtensions`)
 
 `MqttDataEnvelope` 形式でデータを送信（Publish）するためのメソッド群です。デジタルツイン構築やデータの死活監視で主に利用されます。すべてのメソッドのシグネチャは `PublishDataAsync` で統一されており、オプション引数として QoS (`qos`) と Retain (`retain`) フラグを自由に設定できます。
+
+> [!NOTE]
+> `PublishDataAsync` 群は現行設計のベースライン API です。今後の内部実装変更やシリアライザ抽象化を行う場合も、まずこの呼び出し体験を維持する方針です。
 
 #### ① 単一キー・値の送信
 最も手軽に1つのデータポイントを送信するオーバーロードです。`Timestamp` は現在時刻が自動付与されます。

@@ -49,7 +49,7 @@ public sealed class MqttDataEntry
             return true;
         }
 
-        // Newtonsoft.Json は整数を long、浮動小数点を double としてデシリアライズするため、
+        // 既定 serializer（Newtonsoft）は整数を long、浮動小数点を double として扱うため、
         // int や float で取得する際に Convert.ChangeType でキャストする。
         if (Value != null)
         {
