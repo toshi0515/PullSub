@@ -57,6 +57,99 @@ namespace UnityMqtt.V2.Bridge
 
         public MqttV2ClientRuntime Runtime { get; private set; }
 
+        /// <summary>
+        /// Registers a raw message handler for the specified topic.
+        /// This method requires the bridge to be enabled.
+        /// Call this method from Unity main thread. The handler runs on the await continuation
+        /// of <see cref="MqttV2ClientRuntime.ReceiveRawAsync"/>, which uses UnitySynchronizationContext.
+        /// </summary>
+        /// <param name="topic">Exact-match topic name.</param>
+        /// <param name="options">Raw queue options. maxQueueDepth must be greater than zero.</param>
+        /// <param name="handler">Async handler invoked for each received message.</param>
+        /// <param name="cancellationToken">Optional caller cancellation token.</param>
+        public async Task RegisterRawHandlerAsync(
+            string topic,
+            MqttV2RawSubscriptionOptions options,
+            Func<MqttV2RawMessage, CancellationToken, Task> handler,
+            CancellationToken cancellationToken = default)
+        {
+            ValidateRawHandlerArguments(topic, options, handler);
+            var runtime = EnsureRuntimeForRawHandlerRegistration();
+            var operationToken = CreateLinkedOperationToken(_lifecycleCts.Token, cancellationToken, out var linkedCts);
+
+            try
+            {
+                await runtime.RegisterRawHandlerAsync(topic, options, handler, operationToken);
+            }
+            finally
+            {
+                linkedCts?.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Registers a raw message handler and returns an async-disposable handle.
+        /// The returned handle is created only after the underlying subscribe operation succeeds.
+        /// </summary>
+        public async Task<MqttV2RawHandlerRegistration> RegisterRawHandlerLeaseAsync(
+            string topic,
+            MqttV2RawSubscriptionOptions options,
+            Func<MqttV2RawMessage, CancellationToken, Task> handler,
+            CancellationToken cancellationToken = default)
+        {
+            ValidateRawHandlerArguments(topic, options, handler);
+            var runtime = EnsureRuntimeForRawHandlerRegistration();
+            var operationToken = CreateLinkedOperationToken(_lifecycleCts.Token, cancellationToken, out var linkedCts);
+
+            try
+            {
+                var registration = await runtime.RegisterRawHandlerLeaseAsync(topic, options, handler, operationToken);
+
+                // Keep bridge-linked CTS alive while the lease is active so lifecycle/caller cancellation
+                // can continue to propagate into the Core lease loop.
+                if (linkedCts != null)
+                {
+                    var linkedToDispose = linkedCts;
+                    _ = registration.Completion.ContinueWith(
+                        static (_, state) => ((CancellationTokenSource)state).Dispose(),
+                        linkedToDispose,
+                        CancellationToken.None,
+                        TaskContinuationOptions.ExecuteSynchronously,
+                        TaskScheduler.Default);
+                    linkedCts = null;
+                }
+
+                return registration;
+            }
+            finally
+            {
+                linkedCts?.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Convenience overload for synchronous message handlers.
+        /// </summary>
+        public Task<MqttV2RawHandlerRegistration> RegisterRawHandlerLeaseAsync(
+            string topic,
+            MqttV2RawSubscriptionOptions options,
+            Action<MqttV2RawMessage> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return RegisterRawHandlerLeaseAsync(
+                topic,
+                options,
+                (message, _) =>
+                {
+                    handler(message);
+                    return Task.CompletedTask;
+                },
+                cancellationToken);
+        }
+
         private void Awake()
         {
             EnsureConnectionSettings();
@@ -67,10 +160,10 @@ namespace UnityMqtt.V2.Bridge
 
         private async void OnEnable()
         {
+            ResetLifecycleCts();
+
             if (!_startOnEnable)
                 return;
-
-            ResetLifecycleCts();
 
             try
             {
@@ -210,6 +303,59 @@ namespace UnityMqtt.V2.Bridge
 
                 await Runtime.SubscribeDataAsync(topic, _defaultUpdateMode, cancellationToken);
             }
+        }
+
+        private static CancellationToken CreateLinkedOperationToken(
+            CancellationToken first,
+            CancellationToken second,
+            out CancellationTokenSource linkedCts)
+        {
+            if (!first.CanBeCanceled)
+            {
+                linkedCts = null;
+                return second;
+            }
+
+            if (!second.CanBeCanceled)
+            {
+                linkedCts = null;
+                return first;
+            }
+
+            linkedCts = CancellationTokenSource.CreateLinkedTokenSource(first, second);
+            return linkedCts.Token;
+        }
+
+        private static void ValidateRawHandlerArguments(
+            string topic,
+            MqttV2RawSubscriptionOptions options,
+            Func<MqttV2RawMessage, CancellationToken, Task> handler)
+        {
+            if (string.IsNullOrWhiteSpace(topic))
+                throw new ArgumentException("topic is required.", nameof(topic));
+
+            if (options == null)
+                throw new ArgumentNullException(nameof(options));
+
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+        }
+
+        private MqttV2ClientRuntime EnsureRuntimeForRawHandlerRegistration()
+        {
+            EnsureRuntime();
+
+            var runtime = Runtime;
+            if (runtime == null)
+                throw new InvalidOperationException("MqttV2Bridge runtime is not initialized.");
+
+            if (_lifecycleCts == null)
+            {
+                throw new InvalidOperationException(
+                    "MqttV2Bridge is not enabled. Call raw handler registration APIs after OnEnable.");
+            }
+
+            return runtime;
         }
 
         private void ResetLifecycleCts()

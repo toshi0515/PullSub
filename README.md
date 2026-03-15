@@ -119,6 +119,80 @@ await _bridge.Runtime.PublishDataAsync("robot/position", new Dictionary<string, 
 }, cancellationToken: _cts.Token);
 ```
 
+### 4. Raw メッセージをハンドラーで処理する（Bridge）
+
+`MqttV2Bridge.RegisterRawHandlerLeaseAsync()` を使うと、`ReceiveRawAsync()` の明示ループだけでなく
+`CancellationTokenSource` と完了待機 `Task` の管理も不要になります。
+
+```csharp
+using System;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using UnityEngine;
+using UnityMqtt.V2.Bridge;
+using UnityMqtt.V2.Core;
+
+public sealed class RawHandlerExample : MonoBehaviour
+{
+    [SerializeField] private MqttV2Bridge _bridge;
+
+    private MqttV2RawHandlerRegistration _registration;
+
+    private const string TopicName = "test/hello";
+
+    private async void OnEnable()
+    {
+        try
+        {
+            _registration = await _bridge.RegisterRawHandlerLeaseAsync(
+                TopicName,
+                new MqttV2RawSubscriptionOptions(256),
+                message =>
+                {
+                    Debug.Log($"[{message.Topic}] {Encoding.UTF8.GetString(message.Payload)}");
+                });
+        }
+        catch (Exception ex)
+        {
+            Debug.LogException(ex);
+        }
+    }
+
+    private async void OnDisable()
+    {
+        if (_registration == null)
+            return;
+
+        try
+        {
+            await _registration.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            Debug.LogException(ex);
+        }
+        finally
+        {
+            _registration = null;
+        }
+    }
+}
+```
+
+契約:
+
+- この API は Unity メインスレッドから呼び出してください。
+- この API は `OnEnable` 後（Bridge が enabled の間）に呼び出してください。
+- `RegisterRawHandlerLeaseAsync` の戻り値は `Task<MqttV2RawHandlerRegistration>` です。`await` して購読成功を確認してください。
+- `MqttV2RawHandlerRegistration.Completion` を `await` すると handler loop の最終完了/失敗を観測できます。
+- `MqttV2RawHandlerRegistration.DisposeAsync()` は cleanup と完了待機を行います。`OperationCanceledException` 以外の handler 例外はこのメソッドから再送出されます。
+- 例外観測は `Completion` か `DisposeAsync()` のどちらか一方を主経路にしてください。両方を同時利用すると同じ例外を二重に観測する場合があります。
+- `OnDisable` / `OnDestroy` で Bridge lifecycle token がキャンセルされると loop は停止します。
+- 再 `OnEnable` 時は呼び出し側が再登録してください（自動再登録はしません）。
+- 同一 topic の二重登録は `InvalidOperationException` になります。
+- handler 処理が到着レートに追いつかない場合、`DropOldest` が発生します。必要なら `TryGetRawDroppedCount()` を監視してください。
+
 ---
 
 ## クイックスタート — Unity / .NET（Runtime 直接利用）
@@ -178,6 +252,21 @@ await runtime.PublishRawAsync("raw/logs", System.Text.Encoding.UTF8.GetBytes("[I
 var raw = await runtime.ReceiveRawAsync("raw/logs", cts.Token);
 
 Console.WriteLine(System.Text.Encoding.UTF8.GetString(raw.Payload));
+
+// --- Raw lease API（.NET / Runtime 直接利用） ---
+var registration = await runtime.RegisterRawHandlerLeaseAsync(
+    "command/start",
+    new MqttV2RawSubscriptionOptions(32),
+    async (message, ct) =>
+    {
+        Console.WriteLine($"[{message.Topic}] {System.Text.Encoding.UTF8.GetString(message.Payload)}");
+        await Task.Yield();
+    },
+    cts.Token);
+
+// ...
+
+await registration.DisposeAsync();
 ```
 
 ---
@@ -729,6 +818,8 @@ await runtime.SubscribeDataAsync("sensor/critical", MqttV2TopicUpdateMode.Differ
 | `ReceiveRawAsync(topic, ct)` | トピックから次のメッセージを受け取ります。メッセージが到着するまで待機します |
 | `TryDequeueRaw(topic, out message)` | メッセージをすぐに取得します。メッセージがなければ失敗します |
 | `TryGetRawDroppedCount(topic, out droppedCount)` | 溢れたために破棄したメッセージ数を取得します |
+| `RegisterRawHandlerAsync(topic, options, handler, ct)` | Core 拡張 API（Runtime 直接利用可）。受信待機 loop と解除処理を内部で実行します。戻り値 `Task` は loop の完了を表します |
+| `RegisterRawHandlerLeaseAsync(topic, options, handler, ct)` | Core 拡張 API（Runtime 直接利用可）。購読成功後に `MqttV2RawHandlerRegistration` を返します。`DisposeAsync()` で loop 停止と完了待機を実行します |
 
 #### Raw キュー上限
 
@@ -737,6 +828,12 @@ Raw 受信キューはトピックごとに上限付きです。`SubscribeRawAsy
 - `maxQueueDepth`: キュー上限（1 以上）
 
 上限超過時は常に `DropOldest`（最古破棄・新着保持）で動作します。監視には `TryGetRawDroppedCount()` を使ってください。
+
+`RegisterRawHandlerLeaseAsync()` は `RegisterRawHandlerAsync()` と同じ loop を内部で利用し、cleanup を `MqttV2RawHandlerRegistration.DisposeAsync()` に集約します。
+
+ドロップ監視は自動 warning ではなく、`TryGetRawDroppedCount()` を呼び出し側で定期確認する運用を推奨します。
+
+この方針は Runtime 直接利用と Bridge 利用の両方で共通です（Bridge でも自動 warning は出力しません）。
 
 ---
 
