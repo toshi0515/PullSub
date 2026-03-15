@@ -1,5 +1,39 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- **[BREAKING]** `PollRawAsync` を `ReceiveRawAsync` に改名
+
+### Removed
+- **[BREAKING]** `MqttV2ClientRuntime.WaitForNextDataAsync` を削除
+- **[BREAKING]** `MqttV2ClientRuntime.WatchTopicAsync` を削除（`IAsyncEnumerable` ベースの Data 系 Push API）
+- **[BREAKING]** `MqttV2Bridge.WaitForTopicUpdateAsync` を削除
+- **[BREAKING]** `MqttV2Bridge.WatchTopicOnMainThreadAsync` を削除
+- **[BREAKING]** `com.toshi0515.unity-mqtt.asmdef` から `UniTask` 参照を削除
+- `MqttV2DataCache` の changeVersion / changeSignal 管理機構を削除（Push API 内部専用実装）
+
+## [2.2.0]
+
+### Added
+- `MqttSubscriptionLease` を追加し、購読の所有権と解除を `Dispose()` / `DisposeAsync()` に集約
+- `MqttBridge` に `IsManagerStarted` / `IsManagerConnected` を追加
+
+### Changed
+- **[BREAKING]** `MqttClientManager.SubscribeAsync` を lease ベースの one-phase API に変更し、`SubscribeAsync(topic, handler, ct)` が `MqttSubscriptionLease` を返すよう変更
+- **[BREAKING]** `PublishAsync` / `SubscribeAsync` は `StartAsync` 完了後のみ許可する契約に統一
+- `MqttSubscribeExtensions.SubscribeDataTopicAsync(...)` は `MqttSubscriptionLease` を返すよう変更
+- `MqttBridge` は topic ごとの lease を保持し、`ShutdownAsync` / `OnDestroy` で解除するよう変更
+- `MqttHelloExample` / `MqttSpherePosExample` / `MqttManualTestController` を新 lease API に合わせて更新
+- README / MANUAL_TESTS を lease ベースの API に合わせて更新
+
+### Removed
+- **[BREAKING]** `MqttSubscribeResult` / `MqttSubscribeFailureKind` を削除
+- **[BREAKING]** `MqttUnsubscribeResult` / `MqttUnsubscribeFailureKind` / `MqttUnsubscribeMode` を削除
+- **[BREAKING]** `AddMessageHandler(...)` / `SetMessageHandler(...)` / `RemoveMessageHandler(...)` / `UnsubscribeAsync(...)` を削除
+- `MqttPlcCommandPublishExtensions` を削除
+- `MqttDTO.SerializeEnvelope` / `MqttDTO.TryDeserializeData` の互換ヘルパーを削除
+
 ## [2.1.1]
 
 ### Added

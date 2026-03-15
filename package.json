@@ -2,7 +2,7 @@
   "name": "com.toshi0515.unity-mqtt",
   "version": "1.0.0",
   "displayName": "Unity MQTT Client",
-  "description": "Unity MQTT client package using MQTTnet v3.1.2. Provides managed connection lifecycle, typed topic snapshots, timestamped data entries, and Publish/Subscribe helpers without built-in reactive or main-thread dispatch dependencies.",
+  "description": "Unity MQTT client package targeting MQTTnet v4.3.7. Provides a thin runtime wrapper, typed topic snapshots, timestamped data entries, and Publish/Subscribe helpers without built-in reactive or main-thread dispatch dependencies.",
   "unity": "6000.0",
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.1"
@@ -14,7 +14,6 @@
     "mqtt",
     "mqttnet",
     "iot",
-    "plc",
     "networking"
   ]
 }

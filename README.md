@@ -1,473 +1,756 @@
-# Unity MQTT Client
+# unity-mqtt
 
-Unity Package Manager 対応の最小限 MQTT 送受信パッケージ。  
-[MQTTnet](https://github.com/dotnet/MQTTnet) v3.1.2 を使用。
-通信処理はバックグラウンドで行われ、メインスレッドへのディスパッチは利用者が明示的に制御できる設計です。
+Unity と .NET 向けの MQTT クライアントライブラリです。
+[MQTTnet v4](https://github.com/dotnet/MQTTnet) をベースに、カスタマイズ可能なペイロード形式での送受信と Pull 型データアクセスを提供します。
 
-本ライブラリは、Unity 上で取得済みのセンサーデータや装置状態を、決まったフォーマットで MQTT Publish / Subscribe し、扱いやすいスナップショットとして保持することに責務を限定しています。センサー SDK との接続や値の取得自体はライブラリ外で行う想定です。
+![Unity 2019.1+](https://img.shields.io/badge/Unity-2019.1%2B-black) ![.NET Standard 2.1](https://img.shields.io/badge/.NET-Standard%202.1-blue) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+---
 
 ## 特徴
 
-- **型安全なデータアクセス**: `MqttTopicDefinition` でトピックのデータスキーマを定義し、IDE 補完と型チェックを享受
-- **マルチトピック対応**: トピックごとに独立した `MqttDataRepository` を生成
-- **高精度タイムスタンプ**: 各データアイテムごとに「送信元生成時刻」と「Unity 受信時刻」を保持
-- **柔軟な Publish**: 汎用 JSON、PLC コマンド、および Subscribe 互換形式でのデータ送信に対応
-- **スレッドモデルの最適化**: 通信・内部パースはすべてバックグラウンドで処理され、メインスレッドへの不要なコンテキストスイッチを最小化
+- **リアルタイムセンサー値取得**: IoT センサーのような「最新値」を効率的に取得できる **Data 系 API** — スマートホーム、ロボット制御、ITS などの用途に最適
+- **メッセージストリーミング**: すべてのメッセージを逐次処理する **Raw 系 API** — ログ記録、リアルタイム分析、イベントトレーシング用途に最適
+- ManagedClient による自動再接続・再購読
+- `CancellationToken` による待機キャンセル
+- 完全一致トピックのサブスクリプション管理
 
-## 責務範囲
+---
 
-本ライブラリが担当する範囲は以下です。
+## このライブラリを選ぶ理由
 
-```text
-センサー SDK / 装置ドライバ（ライブラリ外）
-    ↓
-シリアライズ・送受信・AoDT の基盤となるデータ保持（本ライブラリ）
-    ↓
-MQTT Broker
-```
+### Pull 型データアクセス
 
-センサーの値取得方法はポーリング、コールバック、定時送信など機器ごとに異なるため、本ライブラリは「取得済みデータを送る」「受信データを扱いやすく保持する」部分に集中します。
+MQTT の多くのクライアントはコールバック・イベント駆動ですが、センサーの最新値を `Update()` 内で参照するにはスレッド間の安全な橋渡しが必要です。unity-mqtt は **Pull 型 API** を採用し、`TryGetDataValue<T>()` を単純に呼び出すだけで最新値が取得できます。受信スレッドとメインスレッドの調整コードが不要です。
 
-## 前提条件
+### Unity 依存なし、どこでも動作
 
-### UniTask
+`MqttV2ClientRuntime` は **純粋な .NET 実装** で、Unity に依存しません。Raspberry Pi などの Linux エッジデバイスでも同じコードが動作するため、送信側と受信側で同じプロジェクト・同じ型定義を使い回せます。
 
-このパッケージは [UniTask](https://github.com/Cysharp/UniTask) に依存しています。  
-パッケージ導入前に、`Packages/manifest.json` の `dependencies` に以下を追加してください:
+### ペイロードコーデックの自由度
 
-```json
-"com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask"
-```
+ライブラリ標準として `json-envelope-v2`（JSON envelope 形式）と `flat-json-v1`（フラット JSON 形式）の 2 種類の Codec を提供しています。`MqttV2Bridge` の Inspector から選択するだけで切り替えられます。独自形式が必要な場合は `MqttV2TextPayloadCodec` を継承して 2 メソッドを実装します（接続後の実行中差し替えはできません）。複合値は `TryGetDataValue<T>()` で JsonConvert ベースの変換を試み、変換できない場合は `false` を返します。
 
-> [!NOTE]
-> R3 依存は削除済みです。Reactive 拡張は本ライブラリには含まれません。
+---
 
-## 導入方法
+## セットアップ
 
-### Package Manager から導入
-
-1. Unity エディタで **Window → Package Manager** を開く
-2. **+ → Add package from git URL...** を選択
-3. 以下の URL を入力:
+Unity Package Manager でリポジトリの Git URL を追加します。
 
 ```
 https://github.com/Toshi-0515/unity-mqtt.git
 ```
 
-## 設計と使い方
+---
 
-### 現在の設計方針
+## クイックスタート — Unity（Bridge 経由）
 
-- `PublishDataAsync` 系オーバーロードは、センサーデータや装置状態を「今すぐ送る」ための基本 API として維持します
-- 受信データは `MqttDataStore` / `MqttDataRepository` にスナップショットとして保持し、呼び出し側は Unity メインスレッドから安全に読む構成を前提とします
-- `MqttDataEntry` は `SourceTimestampUtc` と `ReceivedUtc` を保持し、AoDT（Age of Digital Twin）研究へ拡張するための基盤として扱います
-- フィルタリングやリアクティブな送信制御はライブラリ本体ではなく、上位レイヤーまたは研究用の別実装で組み合わせる想定です
+Inspector で設定する最短パターンです。
 
-### シリアライザ抽象化（Phase 2）
+### 1. シーン配置
 
-- Core の Publish / Subscribe 経路は `IMqttSerializer` を通してシリアライズ・デシリアライズされます
-- 既定実装は `NewtonsoftMqttSerializer` です（従来の payload 互換を維持）
-- `MqttClientManager` のコンストラクタ末尾で serializer を注入できます（未指定時は既定実装）
-- `MqttDTO.SerializeEnvelope` / `MqttDTO.TryDeserializeData` は互換のために残しつつ、内部では既定 serializer に委譲します
+1. 任意の GameObject に `MqttV2Bridge` コンポーネントを追加します。
+2. Inspector で Broker Host / Port を設定します。
+3. 常時受信したいトピックは `Auto Data Topics` に追加します。Raw 購読はスクリプトから明示的に行います。
+4. **Payload Codec** で `JsonEnvelope`（既定）か `FlatJson` を選択します。既存デバイスがフラット JSON を送信している場合は `FlatJson` を選択します。
 
-カスタム serializer を実装する場合は、以下の wire format 互換を維持してください。
-
-- `MqttDataEnvelope` のプロパティ名は `timestamp` / `items`
-- `MqttDataItem` のプロパティ名は `name` / `value`
-- `timestamp` は ISO8601 round-trip 形式（`o`）
-- 既存 `TryGetValue<T>()` と互換を保つため、数値は `long/double` 系として復元される挙動を想定
-
-カスタム serializer 注入例:
+### 2. スクリプトからデータを取得する
 
 ```csharp
-public sealed class MySerializer : IMqttSerializer
+using System.Collections.Generic;
+using System.Threading;
+using UnityEngine;
+using UnityMqtt.V2.Bridge;
+using UnityMqtt.V2.Core;
+
+public class SphereController : MonoBehaviour
 {
-    public string SerializeEnvelope(MqttDataEnvelope envelope)
+    [SerializeField] private MqttV2Bridge _bridge;
+
+    private CancellationTokenSource _cts;
+
+    private async void Start()
     {
-        return Newtonsoft.Json.JsonConvert.SerializeObject(envelope);
+        _cts = new CancellationTokenSource();
+
+        // ブローカーと通信できる状態になるまで待機
+        await _bridge.Runtime.StartAsync(_cts.Token);
+        await _bridge.Runtime.WaitUntilConnectedAsync(_cts.Token);
+
+        // ロボット位置情報を購読開始（最新値を自動更新）
+        await _bridge.Runtime.SubscribeDataAsync("robot/position", cancellationToken: _cts.Token);
+
+        // 最初のデータが到着するまで待機（ネットワーク遅延を吸収）
+        await _bridge.Runtime.WaitForFirstDataAsync("robot/position", _cts.Token);
+        ApplyPosition();
     }
 
-    public bool TryDeserializeData(string payload, out MqttDataEnvelope envelope, out string error)
+    private void Update()
     {
-        envelope = null;
+        ApplyPosition();
+    }
+
+    private void ApplyPosition()
+    {
+        if (_bridge.Runtime.TryGetDataValue<float>("robot/position", "X", out var x) &&
+            _bridge.Runtime.TryGetDataValue<float>("robot/position", "Y", out var y) &&
+            _bridge.Runtime.TryGetDataValue<float>("robot/position", "Z", out var z))
+        {
+            transform.position = new Vector3(x, y, z);
+        }
+    }
+
+    private void OnDestroy()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+    }
+}
+```
+
+### 3. データを送信する
+
+```csharp
+await _bridge.Runtime.PublishDataAsync("robot/position", new Dictionary<string, object>
+{
+    { "X", transform.position.x },
+    { "Y", transform.position.y },
+    { "Z", transform.position.z },
+}, cancellationToken: _cts.Token);
+```
+
+---
+
+## クイックスタート — Unity / .NET（Runtime 直接利用）
+
+Bridge を使わずに `MqttV2ClientRuntime` を直接生成します。
+Unity 以外の .NET 環境でも同じコードが動作します。
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using UnityMqtt.V2.Core;
+
+var profile = new MqttV2ClientProfile(
+    brokerHost: "127.0.0.1",
+    brokerPort: 1883,
+    payloadCodecId: "json-envelope-v2",
+    clientIdPolicy: MqttV2ClientIdPolicy.RandomPerStart);
+
+await using var runtime = new MqttV2ClientRuntime(
+    profile,
+    payloadCodec: new MqttV2JsonPayloadCodec());
+
+using var cts = new CancellationTokenSource();
+
+// ブローカーと通信できるまで起動して接続待機
+await runtime.StartAsync(cts.Token);
+await runtime.WaitUntilConnectedAsync(cts.Token);
+
+// --- Data 系 API: 最新センサー値の取得 ---
+// IMU センサーデータを購読（最新値が自動更新される）
+await runtime.SubscribeDataAsync("sensor/imu", cancellationToken: cts.Token);
+
+// データを送信
+await runtime.PublishDataAsync("sensor/imu", new Dictionary<string, object>
+{
+    { "roll",  0.1 },
+    { "pitch", 0.2 },
+    { "yaw",   0.3 },
+}, cancellationToken: cts.Token);
+
+// 最新值を取得（データが既に到着していれば即座に返却）
+var snapshot = await runtime.WaitForFirstDataAsync("sensor/imu", cts.Token);
+if (snapshot.TryGetValue("roll", out var entry) && entry.TryGetValue<double>(out var roll))
+    Console.WriteLine($"roll = {roll}");
+
+// --- Raw 系 API: すべてのメッセージを逐次処理 ---
+// ログ記録など、到着した全メッセージが必要な場合
+await runtime.SubscribeRawAsync(
+    "raw/logs",
+    new MqttV2RawSubscriptionOptions(maxQueueDepth: 256),
+    cts.Token);
+
+await runtime.PublishRawAsync("raw/logs", System.Text.Encoding.UTF8.GetBytes("[INFO] System started"), cancellationToken: cts.Token);
+
+// 次のメッセージが到着するまで待機
+var raw = await runtime.ReceiveRawAsync("raw/logs", cts.Token);
+
+Console.WriteLine(System.Text.Encoding.UTF8.GetString(raw.Payload));
+```
+
+---
+
+## Data payload 形式
+
+既定の `MqttV2JsonPayloadCodec` では、Data 系 API（`PublishDataAsync` / `SubscribeDataAsync`）は以下の JSON envelope を使用します。
+
+```json
+{
+  "timestamp": "2026-03-14T12:34:56.789Z",
+  "items": [
+    { "name": "X", "value": 1.23 },
+    { "name": "Y", "value": 4.56 },
+    { "name": "Z", "value": 7.89 }
+  ]
+}
+```
+
+生バイト列を直接扱う場合は `PublishRawAsync` / `SubscribeRawAsync` / `ReceiveRawAsync` を使用します。
+
+### ペイロード Codec の選択
+
+ライブラリは以下の 2 種類の Codec を標準提供しています。用途に応じて選択します。
+
+| Codec クラス | Id | 向いている場面 |
+|---|---|---|
+| `MqttV2JsonPayloadCodec`（既定） | `json-envelope-v2` | ライブラリ間の通信、型安全が必要な場面 |
+| `MqttV2FlatJsonPayloadCodec` | `flat-json-v1` | ESP32・Raspberry Pi などの既存デバイスとの連携 |
+
+#### Bridge で切り替える（コードなし）
+
+Inspector の **Payload Codec** フィールドを `FlatJson` に設定するだけで切り替わります。
+
+#### Runtime 直接利用で切り替える
+
+```csharp
+var codec = new MqttV2FlatJsonPayloadCodec();
+
+var profile = new MqttV2ClientProfile(
+    brokerHost: "127.0.0.1",
+    brokerPort: 1883,
+    payloadCodecId: codec.Id,           // "flat-json-v1"
+    clientIdPolicy: MqttV2ClientIdPolicy.RandomPerStart);
+
+await using var runtime = new MqttV2ClientRuntime(profile, payloadCodec: codec);
+```
+
+フラット JSON のペイロードは次のような見た目です。
+
+```json
+{
+  "timestamp": "2026-03-14T12:34:56.789Z",
+  "X": 1.23,
+  "Y": 4.56,
+  "Z": 7.89
+}
+```
+
+Publish / receive は通常の Data 系 API と同じです。
+
+```csharp
+// Publish: { "timestamp": "...", "X": 1.23, "Y": 4.56, "Z": 7.89 } で送信される
+await runtime.PublishDataAsync(
+    "robot/position",
+    DateTime.UtcNow,
+    new Dictionary<string, object> { { "X", 1.23 }, { "Y", 4.56 }, { "Z", 7.89 } },
+    cancellationToken: cts.Token);
+
+// 受信値の取り出し（通常の Data 系 API と同じ）
+if (runtime.TryGetDataValue<double>("robot/position", "X", out var x))
+    Console.WriteLine($"X = {x}");
+```
+
+> **注意**: `flat-json-v1` では `timestamp` はペイロード内の予約キーです。同名のフィールドをデータとして使用しないでください。
+
+### カスタム Codec の実装
+
+独自フォーマットが必要な場合は `MqttV2TextPayloadCodec` を継承します。UTF-8 変換・null ガード・エラーハンドリング・timestamp 正規化はライブラリ側で処理されるため、実装が必要なのは **2 メソッドのみ**です。
+
+#### 例: CSV 形式 Codec
+
+次のような 1 行 CSV でデータをやり取りしたい場合を考えます。
+
+```
+2026-03-14T12:34:56.789Z,X=1.23,Y=4.56,Z=7.89
+```
+
+```csharp
+using System;
+using System.Collections.Generic;
+using UnityMqtt.V2.Core;
+
+public sealed class CsvPayloadCodec : MqttV2TextPayloadCodec
+{
+    public override string Id => "csv-v1";
+
+    // 送信: "timestamp,Key=Value,Key=Value,..." の形式に変換
+    protected override string FormatFields(DateTime timestampUtc, IReadOnlyDictionary<string, object> fields)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append(timestampUtc.ToString("o"));
+
+        foreach (var pair in fields)
+        {
+            if (string.IsNullOrWhiteSpace(pair.Key))
+                continue;
+
+            sb.Append(',');
+            sb.Append(pair.Key);
+            sb.Append('=');
+            sb.Append(pair.Value);
+        }
+
+        return sb.ToString();
+    }
+
+    // 受信: "timestamp,Key=Value,Key=Value,..." を fields に変換
+    protected override bool TryParseFields(
+        string text,
+        out IReadOnlyDictionary<string, object> fields,
+        out DateTime timestampUtc,
+        out string error)
+    {
+        fields = null;
+        timestampUtc = default;
         error = null;
+
         try
         {
-            envelope = Newtonsoft.Json.JsonConvert.DeserializeObject<MqttDataEnvelope>(payload);
-            if (envelope == null)
+            var parts = text.Split(',');
+            timestampUtc = ParseTimestampOrNow(parts[0]);
+
+            var map = new Dictionary<string, object>(StringComparer.Ordinal);
+            for (var i = 1; i < parts.Length; i++)
             {
-                error = "Deserialize returned null.";
-                return false;
+                var sep = parts[i].IndexOf('=');
+                if (sep < 1)
+                    continue;
+
+                var key = parts[i].Substring(0, sep);
+                var val = parts[i].Substring(sep + 1);
+
+                // 数値として解釈できる場合は double に変換
+                map[key] = double.TryParse(val, System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var d) ? (object)d : val;
             }
+
+            fields = map;
             return true;
         }
-        catch (System.Exception ex)
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+}
+```
+
+使い方は標準 Codec と同じです。
+
+```csharp
+var codec = new CsvPayloadCodec();
+
+var profile = new MqttV2ClientProfile(
+    brokerHost: "127.0.0.1",
+    brokerPort: 1883,
+    payloadCodecId: codec.Id,           // "csv-v1"
+    clientIdPolicy: MqttV2ClientIdPolicy.RandomPerStart);
+
+await using var runtime = new MqttV2ClientRuntime(profile, payloadCodec: codec);
+
+// Publish: "2026-03-14T12:34:56.789Z,X=1.23,Y=4.56,Z=7.89" の見た目で送信される
+await runtime.PublishDataAsync(
+    "robot/position",
+    DateTime.UtcNow,
+    new Dictionary<string, object> { { "X", 1.23 }, { "Y", 4.56 }, { "Z", 7.89 } },
+    cancellationToken: cts.Token);
+
+// 受信値の取り出しは通常の Data 系 API と同じ
+if (runtime.TryGetDataValue<double>("robot/position", "X", out var x))
+    Console.WriteLine($"X = {x}");
+```
+
+#### 例: OPC UA JSON Codec（既存 PLC・センサーとの接続）
+
+OPC UA Pub/Sub（MQTT transport）で流れる典型的な JSON ペイロードは次の構造を持ちます。
+
+```json
+{
+    "MessageType": "ua-data",
+    "Messages": [
+        {
+            "Timestamp": "2026-03-14T12:34:56.789Z",
+            "Payload": {
+                "Temperature": { "Value": 23.5 },
+                "Pressure":    { "Value": 101.3 }
+            }
+        }
+    ]
+}
+```
+
+このような「形式が決まっている既存システム」に対しては、`TryParseFields` でペイロードの取り出し方を記述するだけです。
+
+```csharp
+using System;
+using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
+using UnityMqtt.V2.Core;
+
+public sealed class OpcUaJsonCodec : MqttV2TextPayloadCodec
+{
+    public override string Id => "opcua-json-v1";
+
+    protected override bool TryParseFields(
+        string text,
+        out IReadOnlyDictionary<string, object> fields,
+        out DateTime timestampUtc,
+        out string error)
+    {
+        fields = null;
+        timestampUtc = default;
+        error = null;
+
+        try
+        {
+            var root = JObject.Parse(text);
+            var msg = root["Messages"]?[0];
+            if (msg == null)
+            {
+                error = "Messages[0] not found.";
+                return false;
+            }
+
+            timestampUtc = ParseTimestampOrNow(msg.Value<string>("Timestamp"));
+
+            var map = new Dictionary<string, object>(StringComparer.Ordinal);
+            var payload = msg["Payload"] as JObject;
+            if (payload != null)
+            {
+                foreach (var prop in payload.Properties())
+                    map[prop.Name] = prop.Value["Value"];  // Value サブフィールドを展開
+            }
+
+            fields = map;
+            return true;
+        }
+        catch (Exception ex)
         {
             error = ex.Message;
             return false;
         }
     }
 
-    public string SerializeObject<T>(T payload)
-    {
-        return Newtonsoft.Json.JsonConvert.SerializeObject(payload);
-    }
+    // このシステムへの Publish は想定しないため最小実装
+    protected override string FormatFields(DateTime timestampUtc, IReadOnlyDictionary<string, object> fields)
+        => throw new NotSupportedException("Publishing in OPC UA format is not supported by this codec.");
 }
+```
 
-var manager = new MqttClientManager(
-    brokerIp: "127.0.0.1",
+受信側の取り出しは通常の Data 系 API と同じです。
+
+```csharp
+var codec = new OpcUaJsonCodec();
+
+var profile = new MqttV2ClientProfile(
+    brokerHost: "127.0.0.1",
     brokerPort: 1883,
-    serializer: new MySerializer());
+    payloadCodecId: codec.Id,
+    clientIdPolicy: MqttV2ClientIdPolicy.RandomPerStart);
+
+await using var runtime = new MqttV2ClientRuntime(profile, payloadCodec: codec);
+await runtime.StartAsync(cts.Token);
+await runtime.SubscribeDataAsync("factory/plc1", cancellationToken: cts.Token);
+
+if (runtime.TryGetDataValue<double>("factory/plc1", "Temperature", out var temp))
+    Console.WriteLine($"Temperature = {temp}");
 ```
 
-### 現在の制約
+バイナリ形式（MessagePack など byte[] を直接扱う場合）は `IMqttV2PayloadCodec` を直接実装します。
 
-- `SubscribeAsync` は完全一致トピックのみをサポートします。`sensor/#` や `sensor/+` のようなワイルドカード購読は未実装です
-- メッセージハンドラーはバックグラウンドスレッドで呼ばれます。Unity API に触る場合は `UniTask.Post()` などでメインスレッドへ戻してください
-- `SubscribeAsync` / `SubscribeDataTopicAsync` に渡す `CancellationToken` はネットワーク購読のキャンセルに効きますが、登録済みハンドラーの解除は行いません。`OnDestroy` などで `RemoveMessageHandler()` を明示的に呼んでください
+このように「見た目」は自由ですが、ライブラリ内部では `timestamp + fields` に正規化して Data API に渡されます。
 
-### 手動検証
+---
 
-Unity 側の回帰確認にはサンプルプロジェクト `MqttTest` を使用できます。ワークスペース内の `MqttTest/MANUAL_TESTS.md` に、正常起動、Publish / Subscribe、Play Mode 終了時の確認手順をまとめています。
+## 更新モード
 
-### 1. トピック定義を作成する
+`SubscribeDataAsync` の引数でトピックごとに更新モードを選択します。
 
-受信したいトピックのデータスキーマを `MqttTopicDefinition` を継承して定義します。  
-`MqttField<T>` はpublic readonlyにしてフィールド名は、受信する JSON ペイロードの `"name"` と一致させてください。
+| モード | 動作 |
+|---|---|
+| `Differential`（既定） | 受信したフィールドのキーだけ上書き。受信しないキーは保持 |
+| `Replace` | 受信したフィールド全体で再構築。受信しないキーは削除 |
 
 ```csharp
-public class PlcDevice1Topic : MqttTopicDefinition
-{
-    public override string TopicPath => "plc/device1";
-
-    public readonly MqttField<int>   Rotation  = new("Rotation");
-    public readonly MqttField<float> Speed     = new("Speed");
-    public readonly MqttField<bool>  IsRunning = new("IsRunning");
-}
+// トピックごとに Replace モードを指定する例
+await runtime.SubscribeDataAsync("sensor/full", MqttV2TopicUpdateMode.Replace, cts.Token);
 ```
 
-### 2. 受信のセットアップ
+---
 
-`MqttBridge` コンポーネントをアタッチし、インスペクターでブローカー IP と購読したいトピックのリスト（`Topics`）を設定します。
+## TLS / SSL
 
-トピック文字列（例: `"plc/device1"`）は、定義クラスの `TopicPath` と一致させてください。
+ブローカーへの接続を暗号化する場合は TLS を有効にします。
 
-### 3. データ取得
+### Bridge で設定する
 
-`store.GetTopic<T>()` で型安全なトピックインスタンスを取得し、フィールドにアクセスします。
+`MqttV2Bridge` Inspector の **Connection > TLS** セクションで設定します。
+
+#### 基本設定
+
+| 項目 | 説明 |
+|---|---|
+| **Enabled** | TLS 接続を有効化します。既定は OFF |
+| **Target Host (SNI)** | Server Name Indication (SNI) ホスト名。未指定の場合は BrokerHost を使用 |
+
+#### TLS Advanced
+
+| 項目 | 説明 | 用途 |
+|---|---|---|
+| **Ssl Protocols** | 使用する SSL プロトコルバージョン。既定は None（OS が最適選択） | 特定プロトコルの強制が必要な場合のみ |
+| **Allow Untrusted Certificates** | 自署証明書を許可。**開発・検証のみ** | テスト環境での一時的な検証回避 |
+| **Ignore Certificate Chain Errors** | 証明書チェーンエラーを無視。**開発・検証のみ** | テスト環境での検証回避 |
+| **Ignore Certificate Revocation Errors** | 失効チェックスキップ。**開発・検証のみ** | テスト環境での検証回避 |
+
+> **警告**: `AllowUntrustedCertificates`、`IgnoreCertificateChainErrors`、`IgnoreCertificateRevocationErrors` は **本番環境では使用しないでください**。MqttV2Bridge は自動的にこれらの設定をコンソール警告で通知します。
+
+### Runtime 直接利用で設定する
 
 ```csharp
-var store = MqttBridge.Instance.Store;
-var topic = store.GetTopic<PlcDevice1Topic>();
+var tlsOptions = new MqttV2TlsOptions(
+    enabled: true,
+    allowUntrustedCertificates: false,           // 本番では false
+    ignoreCertificateChainErrors: false,         // 本番では false
+    ignoreCertificateRevocationErrors: false,    // 本番では false
+    targetHost: "mqtt.example.com",              // SNI ホスト名（オプション）
+    sslProtocols: System.Security.Authentication.SslProtocols.None); // OS 選択
 
-// 値のみを取得
-int rot = topic.Rotation.Value;
+var profile = new MqttV2ClientProfile(
+    brokerHost: "example.com",
+    brokerPort: 8883,  // TLS ポート（既定 8883）
+    payloadCodecId: "json-envelope-v2",
+    clientIdPolicy: MqttV2ClientIdPolicy.RandomPerStart,
+    connectionOptions: new MqttV2ConnectionOptions(tls: tlsOptions));
 
-// TryGet パターン
-if (topic.Rotation.TryGetValue(out var rotation))
-{
-    Debug.Log($"Rotation: {rotation}");
-}
-
-// タイムスタンプ付き（デジタルツイン・死活監視用）
-var entry = topic.Speed.Entry;
-if (entry != null)
-{
-    Debug.Log($"Speed: {entry.Value}");
-    Debug.Log($"ソース時刻: {entry.SourceTimestampUtc}");
-    Debug.Log($"Unity受信時刻: {entry.ReceivedUtc}");
-    Debug.Log($"データの鮮度 (秒): {entry.Age.TotalSeconds}");
-}
+await using var runtime = new MqttV2ClientRuntime(profile, payloadCodec: /* codec */);
 ```
 
-### 4. データ送信（DataPublish）
+---
 
-Subscribe 側と同じ形式（`MqttDataEnvelope`）でデータを送信します。
+## KeepAlive
+
+KeepAlive は接続をアクティブに保ち、予期しない切断を検出するために使用されます。
+
+### Bridge で設定する
+
+`MqttV2Bridge` Inspector の **Connection > Keep Alive** セクションで設定します。
+
+| 項目 | 説明 |
+|---|---|
+| **Enabled** | KeepAlive を有効化。既定は ON |
+| **Seconds** | KeepAlive ping 間隔（秒）。範囲: 1-3600 秒。既定: 15 秒 |
+
+> **推奨**: KeepAlive 間隔は **Reconnect Delay より小さい値** に設定してください。KeepAlive でブローカーが切断を検知し、その後 Reconnect Delay で再接続するという流れになるため、KeepAlive < Reconnect Delay の関係が正しいです。例：KeepAlive=15秒、Reconnect Delay=30秒
+
+### Runtime 直接利用で設定する
 
 ```csharp
-var manager = MqttBridge.Instance.Manager;
+var keepAliveOptions = new MqttV2KeepAliveOptions(
+    enabled: true,
+    seconds: 30);  // 30 秒ごとに ping
 
-// 単一値の送信
-await manager.PublishDataAsync("unity/data", "Status", "Running");
+var profile = new MqttV2ClientProfile(
+    brokerHost: "127.0.0.1",
+    brokerPort: 1883,
+    payloadCodecId: "json-envelope-v2",
+    clientIdPolicy: MqttV2ClientIdPolicy.RandomPerStart,
+    connectionOptions: new MqttV2ConnectionOptions(keepAlive: keepAliveOptions));
 
-// 特定のトピックの内容をそのままミラー送信
-var topic = store.GetTopic<PlcDevice1Topic>();
-await manager.PublishDataAsync(topic.Repository, topic: "cloud/mirror");
+await using var runtime = new MqttV2ClientRuntime(profile, payloadCodec: /* codec */);
 ```
 
-### 5. PLC コマンド送信
+---
+
+## Last Will and Testament (LWT)
+
+Last Will and Testament は、クライアントが予期しない方法で切断された場合に、ブローカーが自動的にメッセージを発行する機能です。
+
+**用途例**:
+- デバイスのオンライン状態をトピック `devices/{id}/status` で監視
+- IoT センサーが予期しず切断された場合に `{"status":"offline"}` を自動発行
+- ロボット制御システムでアノーマリー検知
+
+### Bridge で設定する
+
+`MqttV2Bridge` Inspector の **Connection > Will (LWT)** セクションで設定します。
+
+| 項目 | 説明 |
+|---|---|
+| **Enabled** | LWT 機能を有効化。既定は OFF |
+| **Will Topic** | LWT メッセージを送信するトピック（完全一致のみ、ワイルドカード非対応） |
+| **Will Payload** | UTF-8 テキストペイロード。JSON フォーマットも可能 |
+| **Qos** | 配信 QoS レベル（既定: QoS 0）|
+| **Retain** | LWT メッセージをサーバーに保持（既定: OFF）|
+
+#### 設定例
+
+```
+Enabled:         ✓ (チェック)
+Will Topic:      robot/status
+Will Payload:    {"status":"offline","reason":"unexpected_disconnect"}
+Qos:             AtLeastOnce
+Retain:          ✓ (チェック、オプション)
+```
+
+### Runtime 直接利用で設定する
 
 ```csharp
-await manager.PublishRunAsync("motor/cmd", frequency: 60, direction: 0);
-await manager.PublishStopAsync("motor/cmd");
+var willOptions = new MqttV2WillOptions(
+    enabled: true,
+    topic: "robot/status",
+    payloadUtf8: "{\"status\":\"offline\",\"reason\":\"unexpected_disconnect\"}",
+    qos: MqttQualityOfServiceLevel.AtLeastOnce,
+    retain: true);  // 最後の LWT を保持して新規購読者に通知
+
+var profile = new MqttV2ClientProfile(
+    brokerHost: "127.0.0.1",
+    brokerPort: 1883,
+    payloadCodecId: "json-envelope-v2",
+    clientIdPolicy: MqttV2ClientIdPolicy.RandomPerStart,
+    connectionOptions: new MqttV2ConnectionOptions(will: willOptions));
+
+await using var runtime = new MqttV2ClientRuntime(profile, payloadCodec: /* codec */);
 ```
 
-### 6. システムアーキテクチャ
+### LWT の検証
 
-```mermaid
-graph TD
-    %% ----- スターター & ライフサイクル層 -----
-    subgraph Unity Environment
-        Bridge["MqttBridge <br> (MonoBehaviour / Singleton)"]
-        
-        %% ライフサイクルイベント
-        UnityEvents(Awake / OnEnable / OnDisable / OnDestroy) -. "Initialize / Cleanup / Dispose" .-> Bridge
-    end
+LWT が正しく設定されているかを検証するには：
 
-    %% ----- コア通信層 -----
-    subgraph Core Communication
-        Manager["MqttClientManager<br>(MQTTnet Wrapper)"]
-        Broker(("MQTT Broker<br>(e.g. Mosquitto)"))
-    end
+1. Bridge または Runtime を起動
+2. LWT Topic を購読
+3. `WaitUntilConnectedAsync()` で接続確認
+4. 別のプロセスでクライアントを kill（予期しない切断を発生させる）
+5. LWT Payload が自動発行されることを確認
 
-    %% ----- データ管理層 -----
-    subgraph Data & State Storage
-        Store["MqttDataStore"]
-        Repo["MqttDataRepository<br>(Topic毎のスナップショット)"]
-        Definition["MqttTopicDefinition<br>(型安全スキーマ)"]
-    end
-
-    %% ----- 拡張メソッド群 -----
-    subgraph Extensions API
-        SubscribeExt["SubscribeExtensions<br>(SubscribeDataTopicAsync)"]
-        PublishExt["PublishExtensions<br>(PublishDataAsync / PublishRunAsync)"]
-    end
-
-    %% ===== エッジ / データの流れ =====
-    
-    %% Bridge の依存関係
-    Bridge == "インスタンス保持" ==> Manager
-    Bridge == "インスタンス保持" ==> Store
-    
-    %% Manager と Broker の通信
-    Manager <== "Publish / Subscribe" ==> Broker
-
-    %% 受信（Subscribe）フロー
-    Bridge -- "初期化時に購読登録" --> SubscribeExt
-    SubscribeExt -- "受信メッセージを自動パース" --> Repo
-    Store -- "トピック別に管理" --> Repo
-    Definition -. "型・スキーマ定義" .-> Repo
-    
-    %% 送信（Publish）フロー
-    UserScripts["ユーザーのC#スクリプト"] --> PublishExt
-    PublishExt -- "JSON/DTO変換" --> Manager
-    UserScripts -- "型安全なデータ取得<br>(store.GetTopic)" --> Definition
-```
-
-## API リファレンス
-
-本ライブラリは `MqttClientManager` を中心に、用途に応じた各種拡張メソッドを提供しています。名前空間はすべて拡張対象と同じものになり、そのまま呼び出すことができます。
-
-### 0. コア API (`MqttClientManager`)
-
-本ライブラリの通信の核となるクラスです。MQTTnet の複雑な設定を隠蔽し、スレッド管理は上位レイヤーに委譲する設計で、基本となる Subscribe / Publish メソッドを提供します。以下は拡張メソッドを使わずに直接コア機能を利用する場合の例です。
-
-#### `SubscribeAsync`
-指定したトピックを購読します。データを受信すると、バックグラウンドスレッドでハンドラーが呼ばれます。
-
-> [!NOTE]
-> 現在の `SubscribeAsync` は完全一致トピックのみをサポートしています。`sensor/#` や `sensor/+` のようなワイルドカード購読は未実装です。
+**注意**: LWT が発火するのは **クライアントが予期しない切断をした場合**のみです。MQTT ブローカーを強制終了しても LWT は発行されません。クライアント側が突然切断されるシナリオをシミュレートしてください。
 
 ```csharp
-var manager = MqttBridge.Instance.Manager;
-
-// 完全一致するトピックを購読し、独自の受信処理を定義する
-await manager.SubscribeAsync("sensor/temp", (topic, payloadBytes) =>
-{
-    // メニューやUI（Unity MainThread）などを操作する場合は
-    // UniTask.Post() 等を用いてコンテキストを切り替えてください
-    UniTask.Post(() =>
-    {
-        var text = System.Text.Encoding.UTF8.GetString(payloadBytes);
-        Debug.Log($"[Received] {topic}: {text}");
-    });
-});
+// 受信側スクリプト（別クライアント）
+await runtime.SubscribeRawAsync(
+    "robot/status",
+    new MqttV2RawSubscriptionOptions(64),
+    cts.Token);
+// ... client を kill する ...
+// ReceiveRawAsync で LWT message が到着することを確認
+var willMessage = await runtime.ReceiveRawAsync("robot/status", cts.Token);
+Console.WriteLine(Encoding.UTF8.GetString(willMessage.Payload));
+// 出力: {"status":"offline","reason":"unexpected_disconnect"}
 ```
 
-#### `PublishAsync`
-生のバイト配列（`byte[]`）を任意のトピックに送信します。QoS レベルや Retain（保持）フラグの指定も可能です。
+### LWT の制約
+
+- **有効化が必須**: クライアント起動前に必ず値を設定。実行中の差し替えはできません
+- **Topic は完全一致のみ**: ワイルドカード（`+` / `#`）は使用不可
+- **接続が失敗した場合**: LWT は発火しません（接続成功後の予期しない切断のみ）
+- **Graceful なシャットダウン**: `DisconnectAsync()` / `ShutdownAsync()` で正常切断された場合、LWT は発火しません
+
+---
+
+## Subscribe QoS
+
+Subscribe の QoS は `MqttV2SubscriptionDefaults` で制御されます。既定値は `AtMostOnce`（QoS 0）です。
+
+### Bridge で設定する
+
+`MqttV2Bridge` Inspector の **Connection > Subscriptions > Subscribe Qos** で設定します。
+
+| QoS レベル | 説明 |
+|---|---|
+| **AtMostOnce（QoS 0）** | メッセージが最大 1 回配信されます（配信保証なし）。低遅延で軽量 |
+| **AtLeastOnce（QoS 1）** | メッセージが最低 1 回配信されます。再送で到達率を上げます |
+| **ExactlyOnce（QoS 2）** | メッセージが正確に 1 回だけ配信されます。処理コストが最も高い |
+
+> **選択ガイド**:
+> - **QoS 0**: IoT センサーの「最新値」（位置、温度など）— 新しい値が頻繁に到着する場合
+> - **QoS 1**: 重要なイベント（アラート、制御コマンド）— 確実に 1 回は必要だが、重複も許容
+> - **QoS 2**: 決済・在庫管理など — 紛失・重複が許されない場合
+
+### Runtime 直接利用で設定する
 
 ```csharp
-byte[] data = new byte[] { 0x00, 0xFF, 0x0A };
+var profile = new MqttV2ClientProfile(
+    brokerHost: "127.0.0.1",
+    brokerPort: 1883,
+    payloadCodecId: "json-envelope-v2",
+    clientIdPolicy: MqttV2ClientIdPolicy.RandomPerStart,
+    connectionOptions: new MqttV2ConnectionOptions(
+        subscriptionDefaults: new MqttV2SubscriptionDefaults(MqttQualityOfServiceLevel.AtLeastOnce)));
 
-// QoS 1 (AtLeastOnce) と Retain フラグを指定して送信する
-await manager.PublishAsync(
-    "raw/topic", 
-    data, 
-    qos: MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce, 
-    retain: true
-);
+await using var runtime = new MqttV2ClientRuntime(profile, payloadCodec: /* codec */);
+
+// すべてのトピックに同じ QoS が適用されます（トピック単位での QoS override はサポートしていません）
+await runtime.SubscribeDataAsync("sensor/critical", MqttV2TopicUpdateMode.Differential, cts.Token);
 ```
 
-### 1. データ受信用拡張メソッド (`MqttSubscribeExtensions`)
+> **注意**: ブローカーは要求 QoS を調停できるため、実際の配信 QoS は要求値と異なる場合があります。実際の QoS はブローカーの設定に依存します。
 
-`MqttDataEnvelope` （タイムスタンプとアイテムリストを持つ標準 JSON フォーマット）として送られてくるデータを受信し、状態管理システムへ流し込みます。
+---
 
-#### `SubscribeDataTopicAsync`
-指定したトピックを購読し、受信した MQTT メッセージをパースして自動的に `MqttDataStore` へ反映させます。内部リポジトリはスレッドセーフ（lock保護）なため安全にバックグラウンドで処理されます。
+## ライフサイクル API
 
-```csharp
-var manager = MqttBridge.Instance.Manager;
-var store = MqttBridge.Instance.Store;
+| メソッド | 説明 |
+|---|---|
+| `StartAsync(ct)` | クライアントを起動します。ブローカーへの接続は この時点では保証しません |
+| `WaitUntilConnectedAsync(ct)` | ブローカーと通信できる状態になり、全ての購読が完了するまで待機します |
+| `DisconnectAsync(ct)` | ブローカーとの通信を一時的に切断します |
+| `ShutdownAsync(ct)` | タイムアウト付きで完全に停止します（既定 3 秒） |
+| `DisposeAsync()` | すべてのリソースを解放して終了します |
 
-// "plc/device1" トピックの購読を開始
-await manager.SubscribeDataTopicAsync("plc/device1", store);
-```
+**使用フロー**: `StartAsync` でクライアントを起動した後、`WaitUntilConnectedAsync` で接続完了と購読完了を待機してから通信を開始してください。`WaitUntilConnectedAsync` は **ブローカーとの実際の通信が確立されることを保証する** ため、その後に `PublishDataAsync` などを呼ぶと確実にメッセージが送信できます。例：
 
-> [!WARNING]
-> 受信イベントフックでUnityメインスレッドなどへのアクセスが必要な場合は、利用者側で処理をディスパッチしてください。
+---
 
-### 2. データ送信用拡張メソッド (`MqttDataPublishExtensions`)
+## データアクセス API
 
-`MqttDataEnvelope` 形式でデータを送信（Publish）するためのメソッド群です。デジタルツイン構築やデータの死活監視で主に利用されます。すべてのメソッドのシグネチャは `PublishDataAsync` で統一されており、オプション引数として QoS (`qos`) と Retain (`retain`) フラグを自由に設定できます。
+本ライブラリは用途に応じた 2 種類のデータ取得方法を提供します：
 
-> [!NOTE]
-> `PublishDataAsync` 群は現行設計のベースライン API です。今後の内部実装変更やシリアライザ抽象化を行う場合も、まずこの呼び出し体験を維持する方針です。
+### スナップショット形式（Data 系 API）
 
-#### ① 単一キー・値の送信
-最も手軽に1つのデータポイントを送信するオーバーロードです。`Timestamp` は現在時刻が自動付与されます。
+温度・湿度センサーなど **最新値が必要な用途** に最適です。受信したデータの最新スナップショットをキーバリュー形式で保持するため、UI 更新時に現在値を即座に取得できます。ネットワーク遅延に強く、スマートホーム、ロボット制御、ITS などのリアルタイム用途に適しています。
 
-```csharp
-// topic: "sensor/temp", name: "Temperature", value: 25.5
-await manager.PublishDataAsync("sensor/temp", "Temperature", 25.5f);
+| メソッド | 説明 |
+|---|---|
+| `WaitForFirstDataAsync(topic, ct)` | トピックの最新データが届くまで待機します。到着済みなら即座に返します |
+| `TryGetDataSnapshot(topic, out snapshot)` | 現在のスナップショットをすぐに取得します。データがまだ到着していなければ失敗します |
+| `TryGetDataValue<T>(topic, key, out value)` | スナップショット内の特定のキー値をすぐに取得します |
 
-// QoS 1 (AtLeastOnce) と Retain フラグを指定して送信する場合
-await manager.PublishDataAsync(
-    "sensor/temp", 
-    "Temperature", 
-    25.5f, 
-    qos: MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce,
-    retain: true
-);
-```
+> **更新セマンティクス**: 同じ値のメッセージを受信した場合でも、対象フィールドの `SourceTimestampUtc` / `ReceivedUtc` は最新受信で更新されます。
 
-#### ② 辞書（Dictionary）からの送信
-複数のデータポイントを一気に送信するオーバーロードです。
+### メッセージストリーム形式（Raw 系 API）
 
-```csharp
-var data = new Dictionary<string, object>
-{
-    { "Rotation", 100 },
-    { "IsRunning", true },
-    { "Speed", 4.5f }
-};
+**すべてのメッセージを逐次処理したい場合**（ログ記録、リアルタイム分析、イベントトレーシングなど）に最適です。到着順にメッセージを取得できるため、メッセージの順序や全数が重要な用途に向いています。
 
-await manager.PublishDataAsync("robot/status", data);
-```
+| メソッド | 説明 |
+|---|---|
+| `SubscribeRawAsync(topic, options, ct)` | Raw キュー設定を指定して購読します。`maxQueueDepth` は 1 以上が必須です |
+| `ReceiveRawAsync(topic, ct)` | トピックから次のメッセージを受け取ります。メッセージが到着するまで待機します |
+| `TryDequeueRaw(topic, out message)` | メッセージをすぐに取得します。メッセージがなければ失敗します |
+| `TryGetRawDroppedCount(topic, out droppedCount)` | 溢れたために破棄したメッセージ数を取得します |
 
-#### ③ `MqttDataItem` のリストからの送信
-あらかじめ構成されたアイテムリストから送信します。
+#### Raw キュー上限
 
-```csharp
-var items = new List<MqttDataItem>
-{
-    new MqttDataItem { Name = "Battery", Value = 80 },
-    new MqttDataItem { Name = "Mode", Value = "Auto" }
-};
+Raw 受信キューはトピックごとに上限付きです。`SubscribeRawAsync()` の `MqttV2RawSubscriptionOptions` で次を指定します。
 
-await manager.PublishDataAsync("drone/info", items);
-```
+- `maxQueueDepth`: キュー上限（1 以上）
 
-#### ④ エントリ辞書（`MqttDataEntry`）からの送信
-内部で保持しているタイムスタンプ情報などを含む辞書から送信します。タイムスタンプは最新の `SourceTimestampUtc` が採用されます。
+上限超過時は常に `DropOldest`（最古破棄・新着保持）で動作します。監視には `TryGetRawDroppedCount()` を使ってください。
 
-```csharp
-// Storeから取り出したデータをそのまま送信する場合などに利用
-IReadOnlyDictionary<string, MqttDataEntry> entries = GetEntries();
-await manager.PublishDataAsync("mirror/topic", entries);
-```
+---
 
-#### ⑤ リポジトリ（`MqttDataRepository`）のスナップショットの送信
-あるトピックが保持している現在の完全な状態（スナップショット）をごっそり他へ転送（ミラー処理）する場合に便利です。
+## このライブラリが向かない用途
 
-```csharp
-var topicData = store.GetTopic<PlcDevice1Topic>();
+このライブラリはシンプルで直感的ですが、以下の要件には適していません：
 
-// 取得元のトピック "plc/device1" 宛にそのまま現状を再送信
-await manager.PublishDataAsync(topicData.Repository);
+- **ワイルドカードトピックの監視** — `sensors/+/temperature` や `devices/#` のワイルドカード契約はサポートしていません。複数トピックの購読が必要な場合は、各トピックを個別に登録してください
+- **実行中の Codec 差し替え** — 起動後に JSON から MessagePack に切り替えるなど、PayloadCodec の実行中差し替えはできません。再初期化が必要です
+- **複数ブローカーの同時接続** — 複数のブローカーと同時に通信することはサポートしていません。フェイルオーバーやブローカースイッチングが必要な場合は複数の Runtime インスタンスを時系列で管理してください
+- **バイナリ効率最優先** — JSON 形式ベースのため、極限の通信効率（バイナリプロトコル化など）が必要な場合は MQTTnet を直接使用してください
 
-// トピック名を "cloud/device1_mirror" と上書きして送信
-await manager.PublishDataAsync(topicData.Repository, topic: "cloud/device1_mirror");
-```
-
-#### ⑥ `MqttDataEnvelope` を直接送信
-タイムスタンプや中身を細かくカスタマイズして送信したい場合に利用します。
-
-```csharp
-var envelope = new MqttDataEnvelope
-{
-    Timestamp = "2024-05-15T12:00:00Z", // 過去の日付などを指定可能
-    Items = new List<MqttDataItem> { /* ... */ }
-};
-
-await manager.PublishDataAsync("custom/sys", envelope);
-```
-
-### 3. PLC 専用コマンド拡張メソッド (`MqttPlcCommandPublishExtensions`)
-
-モーターやコンベアといった機器に対し、`{"command": "...", "freq": ..., "dir": ...}` のフォーマットで JSON コマンドを送信するショートカットです。
-
-#### `PublishRunAsync`
-機器の起動（RUN）コマンドを送信します。周波数（0-120）と方向（0:正転, 1:逆転）を同時に指定可能です。
-
-```csharp
-// 60Hz で正転起動
-await manager.PublishRunAsync("motor/cmd", frequency: 60, direction: 0);
-```
-
-#### `PublishStopAsync`
-機器の停止（STOP）コマンドを送信します。
-
-```csharp
-await manager.PublishStopAsync("motor/cmd");
-```
-
-#### `PublishSetFreqAsync` / `PublishSetDirAsync`
-それぞれ周波数、回転方向のみを変更するコマンドを送信します。
-
-```csharp
-await manager.PublishSetFreqAsync("motor/cmd", frequency: 50);
-await manager.PublishSetDirAsync("motor/cmd", direction: 1);
-```
-
-### 4. 汎用送信用拡張メソッド (`MqttPublishExtensions`)
-
-独自のクラスや任意の文字列、未加工のバイトデータを送信したい場合はこちらを利用します。
-
-#### `PublishAsync<T>`
-任意の C# オブジェクトを `Newtonsoft.Json` を用いて JSON 文字列へシリアライズし、送信します。QoS レベルや Retain（保持）フラグの指定も可能です。
-
-```csharp
-public class CustomPayload
-{
-    public string MessageId { get; set; }
-    public string Action { get; set; }
-}
-
-var payload = new CustomPayload 
-{ 
-    MessageId = "001", 
-    Action = "Reset" 
-};
-
-// QoS 1 (AtLeastOnce) で送信し、Retain を true にする
-await manager.PublishAsync(
-    "system/alert", 
-    payload, 
-    qos: MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce, 
-    retain: true
-);
-```
-
-#### `PublishRawAsync`
-文字列や JSON ではなく、生の `byte[]` 配列をそのまま直接 Publish します。音声データや画像などのバイナリ送信、あるいは独自プロトコルの送受信に利用します。
-
-```csharp
-byte[] rawData = new byte[] { 0x01, 0xFF, 0x0A, 0x0B };
-
-await manager.PublishRawAsync("binary/stream", rawData);
-```
+---
 
 ## ライセンス
 
-MIT License
+[MIT License](LICENSE)
