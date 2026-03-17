@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using MQTTnet.Protocol;
 
 namespace UnityMqtt.V2.Core
 {
@@ -14,7 +15,33 @@ namespace UnityMqtt.V2.Core
             CancellationToken cancellationToken = default)
         {
             ValidateRawHandlerArguments(runtime, topic, options, handler);
-            return RunRawHandlerLoopAsync(runtime, topic, options, handler, cancellationToken, startedSignal: null);
+            return RunRawHandlerLoopAsync(
+                runtime,
+                topic,
+                options,
+                subscribeQos: null,
+                handler,
+                cancellationToken,
+                startedSignal: null);
+        }
+
+        public static Task RegisterRawHandlerAsync(
+            this MqttV2ClientRuntime runtime,
+            string topic,
+            MqttV2RawSubscriptionOptions options,
+            MqttQualityOfServiceLevel subscribeQos,
+            Func<MqttV2RawMessage, CancellationToken, Task> handler,
+            CancellationToken cancellationToken = default)
+        {
+            ValidateRawHandlerArguments(runtime, topic, options, handler);
+            return RunRawHandlerLoopAsync(
+                runtime,
+                topic,
+                options,
+                subscribeQos,
+                handler,
+                cancellationToken,
+                startedSignal: null);
         }
 
         public static async Task<MqttV2RawHandlerRegistration> RegisterRawHandlerLeaseAsync(
@@ -25,11 +52,36 @@ namespace UnityMqtt.V2.Core
             CancellationToken cancellationToken = default)
         {
             ValidateRawHandlerArguments(runtime, topic, options, handler);
+            return await RegisterRawHandlerLeaseAsync(runtime, topic, options, subscribeQos: null, handler, cancellationToken);
+        }
+
+        public static async Task<MqttV2RawHandlerRegistration> RegisterRawHandlerLeaseAsync(
+            this MqttV2ClientRuntime runtime,
+            string topic,
+            MqttV2RawSubscriptionOptions options,
+            MqttQualityOfServiceLevel subscribeQos,
+            Func<MqttV2RawMessage, CancellationToken, Task> handler,
+            CancellationToken cancellationToken = default)
+        {
+            ValidateRawHandlerArguments(runtime, topic, options, handler);
+
+            return await RegisterRawHandlerLeaseAsync(runtime, topic, options, (MqttQualityOfServiceLevel?)subscribeQos, handler, cancellationToken);
+        }
+
+        private static async Task<MqttV2RawHandlerRegistration> RegisterRawHandlerLeaseAsync(
+            MqttV2ClientRuntime runtime,
+            string topic,
+            MqttV2RawSubscriptionOptions options,
+            MqttQualityOfServiceLevel? subscribeQos,
+            Func<MqttV2RawMessage, CancellationToken, Task> handler,
+            CancellationToken cancellationToken)
+        {
+            ValidateRawHandlerArguments(runtime, topic, options, handler);
 
             var registrationCts = new CancellationTokenSource();
             var leaseToken = CreateLinkedOperationToken(cancellationToken, registrationCts.Token, out var registrationLinkedCts);
             var startedSignal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var loopTask = RunRawHandlerLoopAsync(runtime, topic, options, handler, leaseToken, startedSignal);
+            var loopTask = RunRawHandlerLoopAsync(runtime, topic, options, subscribeQos, handler, leaseToken, startedSignal);
 
             try
             {
@@ -85,6 +137,29 @@ namespace UnityMqtt.V2.Core
                 cancellationToken);
         }
 
+        public static Task<MqttV2RawHandlerRegistration> RegisterRawHandlerLeaseAsync(
+            this MqttV2ClientRuntime runtime,
+            string topic,
+            MqttV2RawSubscriptionOptions options,
+            MqttQualityOfServiceLevel subscribeQos,
+            Action<MqttV2RawMessage> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return runtime.RegisterRawHandlerLeaseAsync(
+                topic,
+                options,
+                subscribeQos,
+                (message, _) =>
+                {
+                    handler(message);
+                    return Task.CompletedTask;
+                },
+                cancellationToken);
+        }
+
         private static CancellationToken CreateLinkedOperationToken(
             CancellationToken first,
             CancellationToken second,
@@ -129,13 +204,18 @@ namespace UnityMqtt.V2.Core
             MqttV2ClientRuntime runtime,
             string topic,
             MqttV2RawSubscriptionOptions options,
+            MqttQualityOfServiceLevel? subscribeQos,
             Func<MqttV2RawMessage, CancellationToken, Task> handler,
             CancellationToken cancellationToken,
             TaskCompletionSource<bool> startedSignal)
         {
             try
             {
-                await runtime.SubscribeRawAsync(topic, options, cancellationToken);
+                if (subscribeQos.HasValue)
+                    await runtime.SubscribeRawAsync(topic, options, subscribeQos.Value, cancellationToken);
+                else
+                    await runtime.SubscribeRawAsync(topic, options, cancellationToken);
+
                 startedSignal?.TrySetResult(true);
 
                 while (true)

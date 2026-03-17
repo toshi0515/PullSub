@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using MQTTnet.Protocol;
 
 namespace UnityMqtt.V2.Core
 {
@@ -12,6 +13,10 @@ namespace UnityMqtt.V2.Core
         private sealed class TopicCounter
         {
             public int RawCount;
+            public int DataCount;
+            public MqttQualityOfServiceLevel SubscribeQos;
+
+            public int TotalCount => RawCount + DataCount;
         }
 
         private readonly object _gate = new object();
@@ -19,20 +24,51 @@ namespace UnityMqtt.V2.Core
             = new Dictionary<string, TopicCounter>(StringComparer.Ordinal);
 
         /// <returns>true のとき、このトピックの最初の登録（ネットワーク購読すべき）</returns>
-        public bool RegisterRaw(string topic)
+        public bool RegisterRaw(string topic, MqttQualityOfServiceLevel subscribeQos)
         {
             ValidateExactMatchTopic(topic);
+            ValidateSubscribeQos(subscribeQos);
 
             lock (_gate)
             {
                 if (!_topics.TryGetValue(topic, out var counter))
                 {
                     counter = new TopicCounter();
+                    counter.SubscribeQos = subscribeQos;
                     _topics[topic] = counter;
                 }
+                else
+                {
+                    EnsureSubscribeQosCompatible(topic, counter, subscribeQos);
+                }
 
-                var before = counter.RawCount;
+                var before = counter.TotalCount;
                 counter.RawCount++;
+                return before == 0;
+            }
+        }
+
+        /// <returns>true のとき、このトピックの最初の登録（ネットワーク購読すべき）</returns>
+        public bool RegisterData(string topic, MqttQualityOfServiceLevel subscribeQos)
+        {
+            ValidateExactMatchTopic(topic);
+            ValidateSubscribeQos(subscribeQos);
+
+            lock (_gate)
+            {
+                if (!_topics.TryGetValue(topic, out var counter))
+                {
+                    counter = new TopicCounter();
+                    counter.SubscribeQos = subscribeQos;
+                    _topics[topic] = counter;
+                }
+                else
+                {
+                    EnsureSubscribeQosCompatible(topic, counter, subscribeQos);
+                }
+
+                var before = counter.TotalCount;
+                counter.DataCount++;
                 return before == 0;
             }
         }
@@ -48,7 +84,27 @@ namespace UnityMqtt.V2.Core
                     return false;
 
                 counter.RawCount--;
-                if (counter.RawCount <= 0)
+                if (counter.TotalCount <= 0)
+                {
+                    _topics.Remove(topic);
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        /// <returns>true のとき、参照がなくなった（ネットワーク購読解除すべき）</returns>
+        public bool UnregisterData(string topic)
+        {
+            ValidateExactMatchTopic(topic);
+
+            lock (_gate)
+            {
+                if (!_topics.TryGetValue(topic, out var counter) || counter.DataCount <= 0)
+                    return false;
+
+                counter.DataCount--;
+                if (counter.TotalCount <= 0)
                 {
                     _topics.Remove(topic);
                     return true;
@@ -72,6 +128,40 @@ namespace UnityMqtt.V2.Core
                 var result = new string[_topics.Count];
                 _topics.Keys.CopyTo(result, 0);
                 return result;
+            }
+        }
+
+        public bool TryGetSubscribeQos(string topic, out MqttQualityOfServiceLevel subscribeQos)
+        {
+            lock (_gate)
+            {
+                if (_topics.TryGetValue(topic, out var counter) && counter.TotalCount > 0)
+                {
+                    subscribeQos = counter.SubscribeQos;
+                    return true;
+                }
+
+                subscribeQos = default;
+                return false;
+            }
+        }
+
+        private static void ValidateSubscribeQos(MqttQualityOfServiceLevel subscribeQos)
+        {
+            if (!Enum.IsDefined(typeof(MqttQualityOfServiceLevel), subscribeQos))
+                throw new ArgumentOutOfRangeException(nameof(subscribeQos));
+        }
+
+        private static void EnsureSubscribeQosCompatible(
+            string topic,
+            TopicCounter counter,
+            MqttQualityOfServiceLevel subscribeQos)
+        {
+            if (counter.TotalCount > 0 && counter.SubscribeQos != subscribeQos)
+            {
+                throw new InvalidOperationException(
+                    $"Topic '{topic}' is already registered with subscribe QoS '{counter.SubscribeQos}'. " +
+                    $"Cannot register with different subscribe QoS '{subscribeQos}'.");
             }
         }
 

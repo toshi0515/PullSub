@@ -57,9 +57,19 @@ namespace UnityMqtt.V2.Core
             return PublishRawAsync(topic, bytes, qos, retain, cancellationToken);
         }
 
+        public Task SubscribeRawAsync(
+            string topic,
+            MqttV2RawSubscriptionOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            var subscribeQos = Profile.ConnectionOptions.SubscriptionDefaults.SubscribeQos;
+            return SubscribeRawAsync(topic, options, subscribeQos, cancellationToken);
+        }
+
         public async Task SubscribeRawAsync(
             string topic,
             MqttV2RawSubscriptionOptions options,
+            MqttQualityOfServiceLevel subscribeQos,
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
@@ -87,7 +97,7 @@ namespace UnityMqtt.V2.Core
                     $"Topic '{topic}' is already subscribed as Raw. Call UnsubscribeRawAsync first.");
             }
 
-            var shouldNetworkSubscribe = _subscriptions.RegisterRaw(topic);
+            var shouldNetworkSubscribe = _subscriptions.RegisterRaw(topic, subscribeQos);
             try
             {
                 try
@@ -104,7 +114,7 @@ namespace UnityMqtt.V2.Core
                 {
                     try
                     {
-                        await SubscribeNetworkAsync(topic, operationToken);
+                        await SubscribeNetworkAsync(topic, subscribeQos, operationToken);
                     }
                     catch
                     {
@@ -113,8 +123,8 @@ namespace UnityMqtt.V2.Core
                         if (!_subscriptions.IsRawRegistered(topic))
                             _rawInbox.RemoveTopic(topic);
 
-                        if (_subscriptions.IsRawRegistered(topic) || _typedDataRegistry.IsRegistered(topic))
-                            _ = EnsureNetworkSubscriptionConsistencyAsync(topic);
+                        if (_subscriptions.TryGetSubscribeQos(topic, out var fallbackSubscribeQos))
+                            _ = EnsureNetworkSubscriptionConsistencyAsync(topic, fallbackSubscribeQos);
 
                         throw;
                     }
@@ -130,11 +140,22 @@ namespace UnityMqtt.V2.Core
         /// <summary>
         /// 型付きデータ購読を開始します。同一トピックへの複数回呼び出しは refcount でまとめられます。
         /// 同一トピックへ再登録する場合、Codec は同値（<see cref="object.Equals(object)"/>）である必要があります。
+        /// 同一トピックへ再登録する場合、Subscribe QoS も同一である必要があります。
         /// 解除するには <see cref="UnsubscribeDataAsync"/> を呼んでください。
         /// </summary>
+        public Task SubscribeDataAsync<T>(
+            string topic,
+            IMqttV2PayloadCodec<T> codec,
+            CancellationToken cancellationToken = default)
+        {
+            var subscribeQos = Profile.ConnectionOptions.SubscriptionDefaults.SubscribeQos;
+            return SubscribeDataAsync(topic, codec, subscribeQos, cancellationToken);
+        }
+
         public async Task SubscribeDataAsync<T>(
             string topic,
             IMqttV2PayloadCodec<T> codec,
+            MqttQualityOfServiceLevel subscribeQos,
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
@@ -145,41 +166,40 @@ namespace UnityMqtt.V2.Core
 
             var operationToken = CreateOperationToken(cancellationToken, out var linkedCts);
 
+            var gateAcquired = false;
             try
             {
                 await _subscriptionGate.WaitAsync(operationToken);
-            }
-            catch
-            {
-                linkedCts?.Dispose();
-                throw;
-            }
-            bool isFirst;
-            try
-            {
-                isFirst = _typedDataRegistry.Register<T>(topic, codec, out _);
-            }
-            catch
-            {
-                _subscriptionGate.Release();
-                linkedCts?.Dispose();
-                throw;
-            }
+                gateAcquired = true;
 
-            try
-            {
-                if (isFirst && !_subscriptions.IsRawRegistered(topic) && _client.IsConnected)
+                var typedRegistered = false;
+                var networkRegistered = false;
+                try
+                {
+                    _typedDataRegistry.Register<T>(topic, codec, out _);
+                    typedRegistered = true;
+                    networkRegistered = _subscriptions.RegisterData(topic, subscribeQos);
+                }
+                catch
+                {
+                    if (typedRegistered)
+                        _typedDataRegistry.Unregister(topic);
+                    throw;
+                }
+
+                if (networkRegistered && _client.IsConnected)
                 {
                     try
                     {
-                        await SubscribeNetworkAsync(topic, operationToken);
+                        await SubscribeNetworkAsync(topic, subscribeQos, operationToken);
                     }
                     catch
                     {
                         _typedDataRegistry.Unregister(topic);
+                        _subscriptions.UnregisterData(topic);
 
-                        if (_subscriptions.IsRawRegistered(topic) || _typedDataRegistry.IsRegistered(topic))
-                            _ = EnsureNetworkSubscriptionConsistencyAsync(topic);
+                        if (_subscriptions.TryGetSubscribeQos(topic, out var fallbackSubscribeQos))
+                            _ = EnsureNetworkSubscriptionConsistencyAsync(topic, fallbackSubscribeQos);
 
                         throw;
                     }
@@ -187,7 +207,9 @@ namespace UnityMqtt.V2.Core
             }
             finally
             {
-                _subscriptionGate.Release();
+                if (gateAcquired)
+                    _subscriptionGate.Release();
+
                 linkedCts?.Dispose();
             }
         }
@@ -214,7 +236,7 @@ namespace UnityMqtt.V2.Core
                 if (!_subscriptions.IsRawRegistered(topic))
                     _rawInbox.RemoveTopic(topic);
 
-                if (shouldNetworkUnsubscribe && !_typedDataRegistry.IsRegistered(topic) && _client.IsConnected)
+                if (shouldNetworkUnsubscribe && _client.IsConnected)
                 {
                     await UnsubscribeNetworkAsync(topic, operationToken);
                 }
@@ -242,10 +264,11 @@ namespace UnityMqtt.V2.Core
                 throw;
             }
 
-            var isLast = _typedDataRegistry.Unregister(topic);
+            _typedDataRegistry.Unregister(topic);
+            var shouldNetworkUnsubscribe = _subscriptions.UnregisterData(topic);
             try
             {
-                if (isLast && !_subscriptions.IsRawRegistered(topic) && _client.IsConnected)
+                if (shouldNetworkUnsubscribe && _client.IsConnected)
                 {
                     await UnsubscribeNetworkAsync(topic, operationToken);
                 }

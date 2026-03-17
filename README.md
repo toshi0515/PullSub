@@ -742,8 +742,15 @@ var profile = new MqttV2ClientProfile(
 
 await using var runtime = new MqttV2ClientRuntime(profile);
 
-// すべてのトピックに同じ QoS が適用されます（トピック単位での QoS override はサポートしていません）
+// ConnectionOptions の SubscribeQos（ここでは AtLeastOnce）が既定値として使われます
 await runtime.SubscribeDataAsync<ImuData>("sensor/critical", MqttV2JsonPayloadCodec<ImuData>.Default, cts.Token);
+
+// トピック単位で QoS を指定した場合は、指定値が優先されます
+await runtime.SubscribeDataAsync<ImuData>(
+    "sensor/critical-high",
+    MqttV2JsonPayloadCodec<ImuData>.Default,
+    MqttQualityOfServiceLevel.ExactlyOnce,
+    cts.Token);
 ```
 
 > **注意**: ブローカーは要求 QoS を調停できるため、実際の配信 QoS は要求値と異なる場合があります。実際の QoS はブローカーの設定に依存します。
@@ -774,7 +781,8 @@ await runtime.SubscribeDataAsync<ImuData>("sensor/critical", MqttV2JsonPayloadCo
 
 | メソッド | 説明 |
 |---|---|
-| `SubscribeDataAsync<T>(topic, codec, ct)` | 型付きデータを購読開始します。Codec で自動エンコード/デコードさせます |
+| `SubscribeDataAsync<T>(topic, codec, ct)` | 型付きデータを購読開始します。QoS は `ConnectionOptions.SubscriptionDefaults.SubscribeQos` を使います |
+| `SubscribeDataAsync<T>(topic, codec, subscribeQos, ct)` | 型付きデータを購読開始します。トピック単位の `subscribeQos` を優先します |
 | `WaitForFirstDataAsync<T>(topic, ct)` | トピックの最新データが届くまで待機します。型付きで返却 |
 | `TryGetData<T>(topic, out value)` | 現在のスナップショットをすぐに取得します。型付き。データがまだ到着していなければ失敗します |
 | `PublishDataAsync<T>(topic, value, codec, ct)` | 型付きデータを送信します。Codec でエンコードされます |
@@ -785,7 +793,8 @@ await runtime.SubscribeDataAsync<ImuData>("sensor/critical", MqttV2JsonPayloadCo
 
 | メソッド | 説明 |
 |---|---|
-| `SubscribeRawAsync(topic, options, ct)` | Raw キュー設定を指定して購読します。`maxQueueDepth` は 1 以上が必須です |
+| `SubscribeRawAsync(topic, options, ct)` | Raw キュー設定を指定して購読します。QoS は `ConnectionOptions.SubscriptionDefaults.SubscribeQos` を使います |
+| `SubscribeRawAsync(topic, options, subscribeQos, ct)` | Raw キュー設定を指定して購読します。トピック単位の `subscribeQos` を優先します |
 | `ReceiveRawAsync(topic, ct)` | トピックから次のメッセージを受け取ります。メッセージが到着するまで待機します |
 | `TryDequeueRaw(topic, out message)` | メッセージをすぐに取得します。メッセージがなければ失敗します |
 | `TryGetRawDroppedCount(topic, out droppedCount)` | 溢れたために破棄したメッセージ数を取得します |

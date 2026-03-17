@@ -13,6 +13,8 @@ Thumbs.db
 *.csproj
 *.sln
 omnisharp.json
+InternalsVisibleTo.cs
+InternalsVisibleTo.cs.meta
 
 # Unity
 [Ll]ibrary/

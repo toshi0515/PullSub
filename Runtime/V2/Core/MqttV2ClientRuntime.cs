@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using MQTTnet;
 using MQTTnet.Extensions.ManagedClient;
+using MQTTnet.Protocol;
 
 
 namespace UnityMqtt.V2.Core
@@ -318,11 +319,13 @@ namespace UnityMqtt.V2.Core
                     return;
 
                 SetState(MqttV2ClientState.ResubscribePending);
-                var topicSet = new System.Collections.Generic.HashSet<string>(_subscriptions.SnapshotTopics(), StringComparer.Ordinal);
-                foreach (var t in _typedDataRegistry.SnapshotTopics())
-                    topicSet.Add(t);
-                foreach (var topic in topicSet)
-                    await SubscribeNetworkAsync(topic, cancellationToken);
+                foreach (var topic in _subscriptions.SnapshotTopics())
+                {
+                    if (!_subscriptions.TryGetSubscribeQos(topic, out var subscribeQos))
+                        continue;
+
+                    await SubscribeNetworkAsync(topic, subscribeQos, cancellationToken);
+                }
 
                 SetState(MqttV2ClientState.Ready);
             }
@@ -333,10 +336,11 @@ namespace UnityMqtt.V2.Core
             }
         }
 
-        private async Task SubscribeNetworkAsync(string topic, CancellationToken cancellationToken)
+        private async Task SubscribeNetworkAsync(
+            string topic,
+            MqttQualityOfServiceLevel subscribeQos,
+            CancellationToken cancellationToken)
         {
-            var subscribeQos = Profile.ConnectionOptions.SubscriptionDefaults.SubscribeQos;
-
             var topicFilter = new MqttTopicFilterBuilder()
                 .WithTopic(topic)
                 .WithQualityOfServiceLevel(subscribeQos)
@@ -427,14 +431,16 @@ namespace UnityMqtt.V2.Core
             return linkedCts.Token;
         }
 
-        private async Task EnsureNetworkSubscriptionConsistencyAsync(string topic)
+        private async Task EnsureNetworkSubscriptionConsistencyAsync(
+            string topic,
+            MqttQualityOfServiceLevel subscribeQos)
         {
             try
             {
                 if (IsDisposeRequested || !_client.IsConnected)
                     return;
 
-                await SubscribeNetworkAsync(topic, _disposeCts.Token);
+                await SubscribeNetworkAsync(topic, subscribeQos, _disposeCts.Token);
             }
             catch (OperationCanceledException) when (IsDisposeRequested || _disposeCts.IsCancellationRequested)
             {
