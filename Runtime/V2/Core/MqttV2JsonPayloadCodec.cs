@@ -1,71 +1,126 @@
 using System;
-using System.Collections.Generic;
-using Newtonsoft.Json;
+using System.Buffers;
+using System.Text;
+using System.Text.Json;
 
 namespace UnityMqtt.V2.Core
 {
     /// <summary>
-    /// JSON envelope 形式の標準 Codec（Id: json-envelope-v2）。
-    /// ペイロードは <c>{ "timestamp": "...", "items": [ { "name": "...", "value": ... } ] }</c> 形式です。
+    /// JSON envelope 形式の標準型付き Codec。
+    /// ペイロード形式は <c>{ "timestamp": "...", "data": { ...T のプロパティ... } }</c> です。
     /// </summary>
-    public sealed class MqttV2JsonPayloadCodec : MqttV2TextPayloadCodec
+    public sealed class MqttV2JsonPayloadCodec<T> : MqttV2TextPayloadCodec<T>
     {
-        public override string Id => "json-envelope-v2";
-
-        protected override string FormatFields(DateTime timestampUtc, IReadOnlyDictionary<string, object> fields)
+        private static readonly JsonSerializerOptions DefaultOptions = new JsonSerializerOptions
         {
-            var items = new List<JsonItemContract>(fields.Count);
-            foreach (var pair in fields)
-            {
-                if (string.IsNullOrWhiteSpace(pair.Key))
-                    continue;
+            PropertyNameCaseInsensitive = true
+        };
 
-                items.Add(new JsonItemContract
-                {
-                    Name = pair.Key,
-                    Value = pair.Value
-                });
-            }
+        public static readonly MqttV2JsonPayloadCodec<T> Default = new MqttV2JsonPayloadCodec<T>();
 
-            var envelope = new JsonEnvelopeContract
-            {
-                Timestamp = timestampUtc.ToString("o"),
-                Items = items
-            };
+        private readonly JsonSerializerOptions _options;
 
-            return JsonConvert.SerializeObject(envelope);
+        public MqttV2JsonPayloadCodec(JsonSerializerOptions options = null)
+        {
+            _options = options ?? DefaultOptions;
         }
 
-        protected override bool TryParseFields(string text, out IReadOnlyDictionary<string, object> fields, out DateTime timestampUtc, out string error)
+        public override bool Equals(object obj)
         {
-            fields = null;
-            timestampUtc = default(DateTime);
+            return obj is MqttV2JsonPayloadCodec<T> other
+                && ReferenceEquals(_options, other._options);
+        }
+
+        public override int GetHashCode()
+        {
+            return _options.GetHashCode();
+        }
+
+        public override byte[] Encode(DateTime timestampUtc, T value)
+        {
+            var normalized = NormalizeTimestampOrNow(timestampUtc);
+            var buffer = new ArrayBufferWriter<byte>(256);
+
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                writer.WriteStartObject();
+                writer.WriteString("timestamp", normalized);
+                writer.WritePropertyName("data");
+                JsonSerializer.Serialize(writer, value, _options);
+                writer.WriteEndObject();
+            }
+
+            return buffer.WrittenSpan.ToArray();
+        }
+
+        public override bool TryDecode(ReadOnlySpan<byte> payload, out T value, out DateTime timestampUtc, out string error)
+        {
+            value = default;
+            timestampUtc = default;
             error = null;
+
+            if (payload.IsEmpty)
+            {
+                error = "payload is empty.";
+                return false;
+            }
 
             try
             {
-                var envelope = JsonConvert.DeserializeObject<JsonEnvelopeContract>(text);
-                if (envelope == null)
+                var reader = new Utf8JsonReader(payload);
+                if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
                 {
-                    error = "Deserialize returned null envelope.";
+                    error = "JSON root must be an object.";
                     return false;
                 }
 
-                var map = new Dictionary<string, object>(StringComparer.Ordinal);
-                if (envelope.Items != null)
-                {
-                    foreach (var item in envelope.Items)
-                    {
-                        if (item == null || string.IsNullOrWhiteSpace(item.Name))
-                            continue;
+                long dataStart = -1;
+                long dataEnd = -1;
+                bool gotTimestamp = false;
 
-                        map[item.Name] = item.Value;
+                while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+                {
+                    if (reader.TokenType != JsonTokenType.PropertyName)
+                    {
+                        error = "Unexpected token in root object.";
+                        return false;
+                    }
+
+                    if (reader.ValueTextEquals("timestamp"))
+                    {
+                        reader.Read();
+                        if (reader.TryGetDateTime(out var ts))
+                            timestampUtc = ts.Kind == DateTimeKind.Utc ? ts : ts.ToUniversalTime();
+                        else
+                            timestampUtc = DateTime.UtcNow;
+                        gotTimestamp = true;
+                    }
+                    else if (reader.ValueTextEquals("data"))
+                    {
+                        reader.Read();
+                        dataStart = reader.TokenStartIndex;
+                        reader.Skip();
+                        dataEnd = reader.BytesConsumed;
+                    }
+                    else
+                    {
+                        reader.Read();
+                        reader.Skip();
                     }
                 }
 
-                fields = map;
-                timestampUtc = ParseTimestampOrNow(envelope.Timestamp);
+                if (!gotTimestamp)
+                    timestampUtc = DateTime.UtcNow;
 
+                if (dataStart < 0)
+                {
+                    error = "Missing 'data' field in JSON envelope.";
+                    return false;
+                }
+
+                value = JsonSerializer.Deserialize<T>(
+                    payload.Slice((int)dataStart, (int)(dataEnd - dataStart)),
+                    _options);
                 return true;
             }
             catch (Exception ex)
@@ -75,24 +130,22 @@ namespace UnityMqtt.V2.Core
             }
         }
 
-        [Serializable]
-        private sealed class JsonEnvelopeContract
+        protected override string FormatPayload(DateTime timestampUtc, T value)
         {
-            [JsonProperty("timestamp")]
-            public string Timestamp { get; set; }
-
-            [JsonProperty("items")]
-            public List<JsonItemContract> Items { get; set; }
+            return Encoding.UTF8.GetString(Encode(timestampUtc, value));
         }
 
-        [Serializable]
-        private sealed class JsonItemContract
+        protected override bool TryParsePayload(string text, out T value, out DateTime timestampUtc, out string error)
         {
-            [JsonProperty("name")]
-            public string Name { get; set; }
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                value = default;
+                timestampUtc = default;
+                error = "payload text is empty.";
+                return false;
+            }
 
-            [JsonProperty("value")]
-            public object Value { get; set; }
+            return TryDecode(Encoding.UTF8.GetBytes(text), out value, out timestampUtc, out error);
         }
     }
 }

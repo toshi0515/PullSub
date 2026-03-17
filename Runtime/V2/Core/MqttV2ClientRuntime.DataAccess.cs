@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -32,38 +31,39 @@ namespace UnityMqtt.V2.Core
             }
         }
 
-        public bool TryGetDataSnapshot(string topic, out IReadOnlyDictionary<string, MqttV2DataEntry> snapshot)
+        /// <summary>
+        /// 最後に受信したデータを取得します。SubscribeDataAsync&lt;T&gt; で購読済みであることが前提です。
+        /// </summary>
+        public bool TryGetData<T>(string topic, out T value)
         {
-            return _dataCache.TryGetSnapshot(topic, out snapshot);
+            if (_typedDataRegistry.TryGetCache<T>(topic, out var cache))
+                return cache.TryGet(out value);
+
+            value = default;
+            return false;
         }
 
-        public async Task<IReadOnlyDictionary<string, MqttV2DataEntry>> WaitForFirstDataAsync(
-            string topic,
-            CancellationToken cancellationToken = default)
+        /// <summary>
+        /// 最初のデータが到着するまで非同期に待機します。SubscribeDataAsync&lt;T&gt; で購読済みであることが前提です。
+        /// </summary>
+        public async Task<T> WaitForFirstDataAsync<T>(string topic, CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             MqttV2SubscriptionRegistry.ValidateExactMatchTopic(topic);
-            var operationToken = CreateOperationToken(cancellationToken, out var linkedCts);
 
+            if (!_typedDataRegistry.TryGetCache<T>(topic, out var cache))
+                throw new System.InvalidOperationException(
+                    $"Topic '{topic}' is not registered for type {typeof(T).Name}. Call SubscribeDataAsync<T> first.");
+
+            var operationToken = CreateOperationToken(cancellationToken, out var linkedCts);
             try
             {
-                return await _dataCache.WaitForSnapshotAsync(topic, operationToken);
+                return await cache.WaitForFirstAsync(operationToken);
             }
             finally
             {
                 linkedCts?.Dispose();
             }
-        }
-
-        public bool TryGetDataValue<T>(string topic, string key, out T value)
-        {
-            return _dataCache.TryGetValue(topic, key, out value);
-        }
-
-        public void SetDataUpdateMode(string topic, MqttV2TopicUpdateMode mode)
-        {
-            ThrowIfDisposed();
-            _updateModeStore.SetMode(topic, mode);
         }
     }
 }

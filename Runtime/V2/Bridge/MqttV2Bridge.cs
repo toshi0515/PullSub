@@ -7,17 +7,6 @@ using UnityMqtt.V2.Core;
 
 namespace UnityMqtt.V2.Bridge
 {
-    /// <summary>
-    /// <see cref="MqttV2Bridge"/> Inspector での Codec 選択肢。Bridge 専用の設定型です。
-    /// Runtime を直接生成する場合は <see cref="MqttV2JsonPayloadCodec"/> または
-    /// <see cref="MqttV2FlatJsonPayloadCodec"/> を直接インスタンス化してください。
-    /// </summary>
-    public enum MqttV2BridgeCodecKind
-    {
-        JsonEnvelope = 0,
-        FlatJson = 1,
-    }
-
     public sealed class MqttV2Bridge : MonoBehaviour
     {
         private const string DefaultBrokerHost = "127.0.0.1";
@@ -39,13 +28,6 @@ namespace UnityMqtt.V2.Bridge
         [FormerlySerializedAs("_fixedClientId")]
         [SerializeField] [HideInInspector] private string _legacyFixedClientId = "";
         [SerializeField] [HideInInspector] private bool _legacyConnectionMigrated;
-
-        [Header("Payload")]
-        [SerializeField] private MqttV2BridgeCodecKind _payloadCodecKind = MqttV2BridgeCodecKind.JsonEnvelope;
-
-        [Header("Data")]
-        [SerializeField] private string[] _autoDataTopics = new string[0];
-        [SerializeField] private MqttV2TopicUpdateMode _defaultUpdateMode = MqttV2TopicUpdateMode.Differential;
 
         [Header("Lifecycle")]
         [SerializeField] private bool _startOnEnable = true;
@@ -169,7 +151,6 @@ namespace UnityMqtt.V2.Bridge
             {
                 EnsureRuntime();
                 await Runtime.StartAsync(_lifecycleCts.Token);
-                await SubscribeAutoDataTopicsAsync(_lifecycleCts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -216,22 +197,20 @@ namespace UnityMqtt.V2.Bridge
             if (_initialized && Runtime != null)
                 return;
 
-            var payloadCodec = CreatePayloadCodec(_payloadCodecKind);
             var connectionOptions = _connectionSettings.ToConnectionOptions();
             WarnIfInsecureTlsOptionsEnabled(connectionOptions);
 
             var profile = new MqttV2ClientProfile(
                 brokerHost: _connectionSettings.BrokerHost,
                 brokerPort: _connectionSettings.BrokerPort,
-                payloadCodecId: payloadCodec.Id,
                 clientIdPolicy: _connectionSettings.ClientIdPolicy,
                 fixedClientId: _connectionSettings.FixedClientId,
                 connectionOptions: connectionOptions);
 
             Runtime = new MqttV2ClientRuntime(
                 profile,
-                payloadCodec: payloadCodec,
                 log: message => Debug.Log(message),
+                logWarning: message => Debug.LogWarning(message),
                 logError: message => Debug.LogError(message),
                 logException: ex => Debug.LogException(ex));
 
@@ -241,7 +220,10 @@ namespace UnityMqtt.V2.Bridge
         private static void WarnIfInsecureTlsOptionsEnabled(MqttV2ConnectionOptions connectionOptions)
         {
             var tls = connectionOptions.Tls;
-            if (!tls.Enabled)
+            var transport = connectionOptions.Transport;
+
+            // Ws + TLS 有効は Transport ログで警告済みのためここでは追加警告しない
+            if (!tls.Enabled || transport.Kind == MqttV2TransportKind.Ws)
                 return;
 
             if (tls.AllowUntrustedCertificates || tls.IgnoreCertificateChainErrors || tls.IgnoreCertificateRevocationErrors)
@@ -255,19 +237,6 @@ namespace UnityMqtt.V2.Bridge
                     "[MqttV2Bridge] Insecure TLS validation options are enabled in a non-development build. " +
                     "Use strict certificate validation for production deployments.");
 #endif
-            }
-        }
-
-        private static IMqttV2PayloadCodec CreatePayloadCodec(MqttV2BridgeCodecKind kind)
-        {
-            switch (kind)
-            {
-                case MqttV2BridgeCodecKind.JsonEnvelope:
-                    return new MqttV2JsonPayloadCodec();
-                case MqttV2BridgeCodecKind.FlatJson:
-                    return new MqttV2FlatJsonPayloadCodec();
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(kind), kind, null);
             }
         }
 
@@ -288,20 +257,6 @@ namespace UnityMqtt.V2.Bridge
             {
                 Debug.LogError($"[MqttV2Bridge] Release failed: {ex.Message}");
                 Debug.LogException(ex);
-            }
-        }
-
-        private async Task SubscribeAutoDataTopicsAsync(CancellationToken cancellationToken)
-        {
-            if (_autoDataTopics == null)
-                return;
-
-            foreach (var topic in _autoDataTopics)
-            {
-                if (string.IsNullOrWhiteSpace(topic))
-                    continue;
-
-                await Runtime.SubscribeDataAsync(topic, _defaultUpdateMode, cancellationToken);
             }
         }
 

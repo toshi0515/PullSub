@@ -9,7 +9,9 @@
     "precompiledReferences": [
         "MQTTnet.dll",
         "MQTTnet.Extensions.ManagedClient.dll",
-        "Newtonsoft.Json.dll"
+        "System.Text.Json.dll",
+        "System.Text.Encodings.Web.dll",
+        "Microsoft.Bcl.AsyncInterfaces.dll"
     ],
     "autoReferenced": true,
     "defineConstraints": [],

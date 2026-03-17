@@ -3,20 +3,22 @@ using System.Collections.Generic;
 
 namespace UnityMqtt.V2.Core
 {
+    /// <summary>
+    /// Raw 購読のトピック参照カウントを管理します。
+    /// 型付きデータ購読は <see cref="TypedDataRegistry"/> が担います。
+    /// </summary>
     internal sealed class MqttV2SubscriptionRegistry
     {
         private sealed class TopicCounter
         {
             public int RawCount;
-            public int DataCount;
-
-            public int TotalCount => RawCount + DataCount;
         }
 
         private readonly object _gate = new object();
         private readonly Dictionary<string, TopicCounter> _topics
             = new Dictionary<string, TopicCounter>(StringComparer.Ordinal);
 
+        /// <returns>true のとき、このトピックの最初の登録（ネットワーク購読すべき）</returns>
         public bool RegisterRaw(string topic)
         {
             ValidateExactMatchTopic(topic);
@@ -29,30 +31,13 @@ namespace UnityMqtt.V2.Core
                     _topics[topic] = counter;
                 }
 
-                var before = counter.TotalCount;
+                var before = counter.RawCount;
                 counter.RawCount++;
                 return before == 0;
             }
         }
 
-        public bool RegisterData(string topic)
-        {
-            ValidateExactMatchTopic(topic);
-
-            lock (_gate)
-            {
-                if (!_topics.TryGetValue(topic, out var counter))
-                {
-                    counter = new TopicCounter();
-                    _topics[topic] = counter;
-                }
-
-                var before = counter.TotalCount;
-                counter.DataCount++;
-                return before == 0;
-            }
-        }
-
+        /// <returns>true のとき、参照がなくなった（ネットワーク購読解除すべき）</returns>
         public bool UnregisterRaw(string topic)
         {
             ValidateExactMatchTopic(topic);
@@ -63,21 +48,12 @@ namespace UnityMqtt.V2.Core
                     return false;
 
                 counter.RawCount--;
-                return TryCleanupAndReturnShouldUnsubscribe(topic, counter);
-            }
-        }
-
-        public bool UnregisterData(string topic)
-        {
-            ValidateExactMatchTopic(topic);
-
-            lock (_gate)
-            {
-                if (!_topics.TryGetValue(topic, out var counter) || counter.DataCount <= 0)
-                    return false;
-
-                counter.DataCount--;
-                return TryCleanupAndReturnShouldUnsubscribe(topic, counter);
+                if (counter.RawCount <= 0)
+                {
+                    _topics.Remove(topic);
+                    return true;
+                }
+                return false;
             }
         }
 
@@ -86,14 +62,6 @@ namespace UnityMqtt.V2.Core
             lock (_gate)
             {
                 return _topics.TryGetValue(topic, out var counter) && counter.RawCount > 0;
-            }
-        }
-
-        public bool IsDataRegistered(string topic)
-        {
-            lock (_gate)
-            {
-                return _topics.TryGetValue(topic, out var counter) && counter.DataCount > 0;
             }
         }
 
@@ -110,15 +78,6 @@ namespace UnityMqtt.V2.Core
         public static void ValidateExactMatchTopic(string topic)
         {
             MqttV2TopicValidator.ValidateExactMatchTopic(topic);
-        }
-
-        private bool TryCleanupAndReturnShouldUnsubscribe(string topic, TopicCounter counter)
-        {
-            if (counter.TotalCount > 0)
-                return false;
-
-            _topics.Remove(topic);
-            return true;
         }
     }
 }

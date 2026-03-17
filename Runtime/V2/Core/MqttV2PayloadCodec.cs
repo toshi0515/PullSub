@@ -1,12 +1,14 @@
 ﻿using System;
-using System.Collections.Generic;
 
 namespace UnityMqtt.V2.Core
 {
-    public interface IMqttV2PayloadCodec
+    /// <summary>
+    /// 型付きペイロード Codec の標準インターフェース。
+    /// Codec を書く = ペイロード構造と期待する型 T を両方知っている という責務を持ちます。
+    /// </summary>
+    public interface IMqttV2PayloadCodec<T>
     {
-        string Id { get; }
-        byte[] Encode(DateTime timestampUtc, IReadOnlyDictionary<string, object> fields);
-        bool TryDecode(byte[] payload, out IReadOnlyDictionary<string, object> fields, out DateTime timestampUtc, out string error);
+        byte[] Encode(DateTime timestampUtc, T value);
+        bool TryDecode(ReadOnlySpan<byte> payload, out T value, out DateTime timestampUtc, out string error);
     }
 }

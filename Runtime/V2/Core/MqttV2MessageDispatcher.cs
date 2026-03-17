@@ -6,27 +6,21 @@ namespace UnityMqtt.V2.Core
     internal sealed class MqttV2MessageDispatcher
     {
         private readonly MqttV2SubscriptionRegistry _subscriptions;
+        private readonly TypedDataRegistry _typedDataRegistry;
         private readonly MqttV2RawInbox _rawInbox;
-        private readonly MqttV2DataCache _dataCache;
-        private readonly MqttV2TopicUpdateModeStore _updateModeStore;
-        private readonly IMqttV2PayloadCodec _payloadCodec;
         private readonly Action<string> _logError;
         private readonly Action<Exception> _logException;
 
         public MqttV2MessageDispatcher(
             MqttV2SubscriptionRegistry subscriptions,
+            TypedDataRegistry typedDataRegistry,
             MqttV2RawInbox rawInbox,
-            MqttV2DataCache dataCache,
-            MqttV2TopicUpdateModeStore updateModeStore,
-            IMqttV2PayloadCodec payloadCodec,
             Action<string> logError,
             Action<Exception> logException)
         {
             _subscriptions = subscriptions ?? throw new ArgumentNullException(nameof(subscriptions));
+            _typedDataRegistry = typedDataRegistry ?? throw new ArgumentNullException(nameof(typedDataRegistry));
             _rawInbox = rawInbox ?? throw new ArgumentNullException(nameof(rawInbox));
-            _dataCache = dataCache ?? throw new ArgumentNullException(nameof(dataCache));
-            _updateModeStore = updateModeStore ?? throw new ArgumentNullException(nameof(updateModeStore));
-            _payloadCodec = payloadCodec ?? throw new ArgumentNullException(nameof(payloadCodec));
             _logError = logError ?? (_ => { });
             _logException = logException ?? (_ => { });
         }
@@ -39,19 +33,26 @@ namespace UnityMqtt.V2.Core
             try
             {
                 var topic = message.Topic;
-                var hasRawSubscription = _subscriptions.IsRawRegistered(topic);
-                var hasDataSubscription = _subscriptions.IsDataRegistered(topic);
+                var hasRaw = _subscriptions.IsRawRegistered(topic);
+                var hasData = _typedDataRegistry.IsRegistered(topic);
 
-                if (!hasRawSubscription && !hasDataSubscription)
+                if (!hasRaw && !hasData)
                     return;
 
-                var payload = ClonePayload(message.PayloadSegment);
-
-                if (hasRawSubscription)
+                if (hasRaw)
+                {
+                    // Raw queue stores payload beyond this callback, so cloning is required.
+                    var payload = ClonePayload(message.PayloadSegment);
                     _rawInbox.Enqueue(topic, payload);
 
-                if (hasDataSubscription)
-                    ProcessDataPayload(topic, payload);
+                    if (hasData)
+                        ProcessDataPayload(topic, payload);
+                }
+                else
+                {
+                    // Data-only path can decode directly from MQTTnet payload without cloning.
+                    ProcessDataPayload(topic, message.PayloadSegment.AsSpan());
+                }
             }
             catch (Exception ex)
             {
@@ -59,16 +60,12 @@ namespace UnityMqtt.V2.Core
             }
         }
 
-        private void ProcessDataPayload(string topic, byte[] payload)
+        private void ProcessDataPayload(string topic, ReadOnlySpan<byte> payload)
         {
-            if (!_payloadCodec.TryDecode(payload, out var fields, out var timestampUtc, out var codecError))
+            if (!_typedDataRegistry.TryDecodeAndUpdate(topic, payload))
             {
-                _logError($"[MQTT-V2] payload codec decode failed. topic={topic}, error={codecError}");
-                return;
+                _logError($"[MQTT-V2] typed payload decode failed. topic={topic}");
             }
-
-            var mode = _updateModeStore.GetMode(topic);
-            _dataCache.ApplyFields(topic, fields, timestampUtc, mode);
         }
 
         private static byte[] ClonePayload(ArraySegment<byte> payload)

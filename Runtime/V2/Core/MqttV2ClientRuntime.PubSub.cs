@@ -1,5 +1,4 @@
-using System;
-using System.Collections.Generic;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using MQTTnet;
@@ -9,7 +8,7 @@ namespace UnityMqtt.V2.Core
 {
     public sealed partial class MqttV2ClientRuntime
     {
-        public async Task PublishRawAsync(
+        public Task PublishRawAsync(
             string topic,
             byte[] payload,
             MqttQualityOfServiceLevel qos = MqttQualityOfServiceLevel.AtMostOnce,
@@ -31,31 +30,16 @@ namespace UnityMqtt.V2.Core
                 .WithRetainFlag(retain)
                 .Build();
 
-            var operationToken = CreateOperationToken(cancellationToken, out var linkedCts);
-            try
-            {
-                await MqttV2AsyncUtils.AwaitWithCancellation(_client.EnqueueAsync(message), operationToken);
-            }
-            finally
-            {
-                linkedCts?.Dispose();
-            }
+            return MqttV2AsyncUtils.AwaitWithCancellation(
+                _client.EnqueueAsync(message),
+                cancellationToken,
+                _disposeCts.Token);
         }
 
-        public Task PublishDataAsync(
+        public Task PublishDataAsync<T>(
             string topic,
-            IReadOnlyDictionary<string, object> values,
-            MqttQualityOfServiceLevel qos = MqttQualityOfServiceLevel.AtMostOnce,
-            bool retain = false,
-            CancellationToken cancellationToken = default)
-        {
-            return PublishDataAsync(topic, DateTime.UtcNow, values, qos, retain, cancellationToken);
-        }
-
-        public async Task PublishDataAsync(
-            string topic,
-            DateTime timestampUtc,
-            IReadOnlyDictionary<string, object> values,
+            T value,
+            IMqttV2PayloadCodec<T> codec,
             MqttQualityOfServiceLevel qos = MqttQualityOfServiceLevel.AtMostOnce,
             bool retain = false,
             CancellationToken cancellationToken = default)
@@ -63,14 +47,14 @@ namespace UnityMqtt.V2.Core
             ThrowIfDisposed();
             MqttV2SubscriptionRegistry.ValidateExactMatchTopic(topic);
 
-            if (values == null)
-                throw new ArgumentNullException(nameof(values));
+            if (codec == null)
+                throw new ArgumentNullException(nameof(codec));
 
-            var bytes = _payloadCodec.Encode(timestampUtc, values);
+            var bytes = codec.Encode(DateTime.UtcNow, value);
             if (bytes == null)
                 throw new InvalidOperationException("Payload codec returned null bytes.");
 
-            await PublishRawAsync(topic, bytes, qos, retain, cancellationToken);
+            return PublishRawAsync(topic, bytes, qos, retain, cancellationToken);
         }
 
         public async Task SubscribeRawAsync(
@@ -129,9 +113,7 @@ namespace UnityMqtt.V2.Core
                         if (!_subscriptions.IsRawRegistered(topic))
                             _rawInbox.RemoveTopic(topic);
 
-                        // Another caller may have registered the same topic concurrently.
-                        // If a registration remains, attempt a best-effort network subscribe repair.
-                        if (_subscriptions.IsRawRegistered(topic) || _subscriptions.IsDataRegistered(topic))
+                        if (_subscriptions.IsRawRegistered(topic) || _typedDataRegistry.IsRegistered(topic))
                             _ = EnsureNetworkSubscriptionConsistencyAsync(topic);
 
                         throw;
@@ -145,13 +127,22 @@ namespace UnityMqtt.V2.Core
             }
         }
 
-        public async Task SubscribeDataAsync(
+        /// <summary>
+        /// 型付きデータ購読を開始します。同一トピックへの複数回呼び出しは refcount でまとめられます。
+        /// 同一トピックへ再登録する場合、Codec は同値（<see cref="object.Equals(object)"/>）である必要があります。
+        /// 解除するには <see cref="UnsubscribeDataAsync"/> を呼んでください。
+        /// </summary>
+        public async Task SubscribeDataAsync<T>(
             string topic,
-            MqttV2TopicUpdateMode mode = MqttV2TopicUpdateMode.Differential,
+            IMqttV2PayloadCodec<T> codec,
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             MqttV2SubscriptionRegistry.ValidateExactMatchTopic(topic);
+
+            if (codec == null)
+                throw new ArgumentNullException(nameof(codec));
+
             var operationToken = CreateOperationToken(cancellationToken, out var linkedCts);
 
             try
@@ -163,13 +154,21 @@ namespace UnityMqtt.V2.Core
                 linkedCts?.Dispose();
                 throw;
             }
-
-            _updateModeStore.SetMode(topic, mode);
-
-            var shouldNetworkSubscribe = _subscriptions.RegisterData(topic);
+            bool isFirst;
             try
             {
-                if (shouldNetworkSubscribe && _client.IsConnected)
+                isFirst = _typedDataRegistry.Register<T>(topic, codec, out _);
+            }
+            catch
+            {
+                _subscriptionGate.Release();
+                linkedCts?.Dispose();
+                throw;
+            }
+
+            try
+            {
+                if (isFirst && !_subscriptions.IsRawRegistered(topic) && _client.IsConnected)
                 {
                     try
                     {
@@ -177,11 +176,9 @@ namespace UnityMqtt.V2.Core
                     }
                     catch
                     {
-                        _subscriptions.UnregisterData(topic);
+                        _typedDataRegistry.Unregister(topic);
 
-                        // Another caller may have registered the same topic concurrently.
-                        // If a registration remains, attempt a best-effort network subscribe repair.
-                        if (_subscriptions.IsRawRegistered(topic) || _subscriptions.IsDataRegistered(topic))
+                        if (_subscriptions.IsRawRegistered(topic) || _typedDataRegistry.IsRegistered(topic))
                             _ = EnsureNetworkSubscriptionConsistencyAsync(topic);
 
                         throw;
@@ -217,7 +214,7 @@ namespace UnityMqtt.V2.Core
                 if (!_subscriptions.IsRawRegistered(topic))
                     _rawInbox.RemoveTopic(topic);
 
-                if (shouldNetworkUnsubscribe && _client.IsConnected)
+                if (shouldNetworkUnsubscribe && !_typedDataRegistry.IsRegistered(topic) && _client.IsConnected)
                 {
                     await UnsubscribeNetworkAsync(topic, operationToken);
                 }
@@ -245,10 +242,10 @@ namespace UnityMqtt.V2.Core
                 throw;
             }
 
-            var shouldNetworkUnsubscribe = _subscriptions.UnregisterData(topic);
+            var isLast = _typedDataRegistry.Unregister(topic);
             try
             {
-                if (shouldNetworkUnsubscribe && _client.IsConnected)
+                if (isLast && !_subscriptions.IsRawRegistered(topic) && _client.IsConnected)
                 {
                     await UnsubscribeNetworkAsync(topic, operationToken);
                 }

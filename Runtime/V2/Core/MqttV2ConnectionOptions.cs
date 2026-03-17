@@ -4,6 +4,108 @@ using MQTTnet.Protocol;
 
 namespace UnityMqtt.V2.Core
 {
+    public enum MqttV2TransportKind
+    {
+        /// <summary>MQTT over TCP（既定）</summary>
+        Tcp = 0,
+        /// <summary>MQTT over WebSocket (ws://)</summary>
+        Ws = 1,
+        /// <summary>MQTT over Secure WebSocket (wss://)</summary>
+        Wss = 2,
+    }
+
+    public sealed class MqttV2TransportOptions : IEquatable<MqttV2TransportOptions>
+    {
+        private const string DefaultSubprotocol = "mqtt";
+        private const string DefaultPath = "/";
+
+        public static MqttV2TransportOptions TcpDefault { get; } = new MqttV2TransportOptions(MqttV2TransportKind.Tcp);
+
+        public MqttV2TransportOptions(
+            MqttV2TransportKind kind,
+            string webSocketPath = null,
+            string webSocketSubprotocol = null)
+        {
+            if (!Enum.IsDefined(typeof(MqttV2TransportKind), kind))
+                throw new ArgumentOutOfRangeException(nameof(kind));
+
+            Kind = kind;
+
+            if (kind == MqttV2TransportKind.Tcp)
+            {
+                WebSocketPath = DefaultPath;
+                WebSocketSubprotocol = DefaultSubprotocol;
+                return;
+            }
+
+            // Ws / Wss: Path
+            if (string.IsNullOrEmpty(webSocketPath))
+            {
+                WebSocketPath = DefaultPath;
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(webSocketPath))
+                    throw new ArgumentException("webSocketPath cannot be whitespace-only.", nameof(webSocketPath));
+                WebSocketPath = webSocketPath.StartsWith("/") ? webSocketPath : "/" + webSocketPath;
+            }
+
+            // Ws / Wss: Subprotocol
+            if (string.IsNullOrEmpty(webSocketSubprotocol))
+            {
+                WebSocketSubprotocol = DefaultSubprotocol;
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(webSocketSubprotocol))
+                    throw new ArgumentException("webSocketSubprotocol cannot be whitespace-only.", nameof(webSocketSubprotocol));
+
+                WebSocketSubprotocol = webSocketSubprotocol;
+            }
+        }
+
+        public MqttV2TransportKind Kind { get; }
+
+        /// <summary>
+        /// WebSocket のパス。Kind=Tcp では未使用。
+        /// Kind=Ws/Wss で未指定の場合は "/" に正規化されます。
+        /// </summary>
+        public string WebSocketPath { get; }
+
+        /// <summary>
+        /// WebSocket のサブプロトコル。Kind=Tcp では未使用。
+        /// Kind=Ws/Wss で未指定の場合は "mqtt" が使われます。
+        /// </summary>
+        public string WebSocketSubprotocol { get; }
+
+        public bool Equals(MqttV2TransportOptions other)
+        {
+            if (ReferenceEquals(null, other))
+                return false;
+
+            if (ReferenceEquals(this, other))
+                return true;
+
+            return Kind == other.Kind
+                && string.Equals(WebSocketPath, other.WebSocketPath, StringComparison.Ordinal)
+                && string.Equals(WebSocketSubprotocol, other.WebSocketSubprotocol, StringComparison.Ordinal);
+        }
+
+        public override bool Equals(object obj) => Equals(obj as MqttV2TransportOptions);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                var hashCode = (int)Kind;
+                hashCode = (hashCode * 397) ^ StringComparer.Ordinal.GetHashCode(WebSocketPath);
+                hashCode = (hashCode * 397) ^ StringComparer.Ordinal.GetHashCode(WebSocketSubprotocol);
+                return hashCode;
+            }
+        }
+    }
+
+
     public sealed class MqttV2Credentials : IEquatable<MqttV2Credentials>
     {
         public static MqttV2Credentials Anonymous { get; } = new MqttV2Credentials();
@@ -305,7 +407,8 @@ namespace UnityMqtt.V2.Core
             bool useCleanSession = true,
             MqttV2TlsOptions tls = null,
             MqttV2WillOptions will = null,
-            MqttV2SubscriptionDefaults subscriptionDefaults = null)
+            MqttV2SubscriptionDefaults subscriptionDefaults = null,
+            MqttV2TransportOptions transport = null)
             : this(
                 credentials,
                 new MqttV2KeepAliveOptions(enabled: true, seconds: keepAliveSeconds),
@@ -313,7 +416,8 @@ namespace UnityMqtt.V2.Core
                 useCleanSession,
                 tls,
                 will,
-                subscriptionDefaults)
+                subscriptionDefaults,
+                transport)
         {
         }
 
@@ -324,7 +428,8 @@ namespace UnityMqtt.V2.Core
             bool useCleanSession = true,
             MqttV2TlsOptions tls = null,
             MqttV2WillOptions will = null,
-            MqttV2SubscriptionDefaults subscriptionDefaults = null)
+            MqttV2SubscriptionDefaults subscriptionDefaults = null,
+            MqttV2TransportOptions transport = null)
         {
             if (reconnectDelaySeconds < 1)
                 throw new ArgumentOutOfRangeException(nameof(reconnectDelaySeconds), "reconnectDelaySeconds must be greater than 0.");
@@ -336,6 +441,7 @@ namespace UnityMqtt.V2.Core
             Tls = tls ?? MqttV2TlsOptions.Disabled;
             Will = will ?? MqttV2WillOptions.Disabled;
             SubscriptionDefaults = subscriptionDefaults ?? MqttV2SubscriptionDefaults.Default;
+            Transport = transport ?? MqttV2TransportOptions.TcpDefault;
         }
 
         public MqttV2Credentials Credentials { get; }
@@ -346,6 +452,7 @@ namespace UnityMqtt.V2.Core
         public MqttV2TlsOptions Tls { get; }
         public MqttV2WillOptions Will { get; }
         public MqttV2SubscriptionDefaults SubscriptionDefaults { get; }
+        public MqttV2TransportOptions Transport { get; }
 
         public bool Equals(MqttV2ConnectionOptions other)
         {
@@ -361,7 +468,8 @@ namespace UnityMqtt.V2.Core
                 && UseCleanSession == other.UseCleanSession
                 && Equals(Tls, other.Tls)
                 && Equals(Will, other.Will)
-                && Equals(SubscriptionDefaults, other.SubscriptionDefaults);
+                && Equals(SubscriptionDefaults, other.SubscriptionDefaults)
+                && Equals(Transport, other.Transport);
         }
 
         public override bool Equals(object obj) => Equals(obj as MqttV2ConnectionOptions);
@@ -377,6 +485,7 @@ namespace UnityMqtt.V2.Core
                 hashCode = (hashCode * 397) ^ (Tls != null ? Tls.GetHashCode() : 0);
                 hashCode = (hashCode * 397) ^ (Will != null ? Will.GetHashCode() : 0);
                 hashCode = (hashCode * 397) ^ (SubscriptionDefaults != null ? SubscriptionDefaults.GetHashCode() : 0);
+                hashCode = (hashCode * 397) ^ (Transport != null ? Transport.GetHashCode() : 0);
                 return hashCode;
             }
         }

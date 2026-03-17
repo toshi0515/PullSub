@@ -10,6 +10,9 @@ namespace UnityMqtt.V2.Bridge
     [Serializable]
     public sealed class MqttV2BridgeTlsSettings
     {
+        [Tooltip("TLS オプションを有効化します。\n" +
+            "Wss トランスポートを使用する場合: Enabled を ON にすることで AllowUntrustedCertificates などの証明書オプションが適用されます。" +
+            " Enabled = OFF のままでも wss:// 接続は TLS で行われますが証明書オプションはすべて無視されます（OS デフォルトの厳格な証明書検証が適用されます）。")]
         [SerializeField] private bool _enabled;
 
         [Tooltip("For development/testing only. Do not enable in production unless you fully understand the risk.")]
@@ -109,6 +112,27 @@ namespace UnityMqtt.V2.Bridge
     }
 
     [Serializable]
+    public sealed class MqttV2BridgeTransportSettings
+    {
+        [Tooltip("接続トランスポートプロトコルを選択します。\nTcp: MQTT over TCP（既定）\nWs: MQTT over WebSocket（ws://）\nWss: MQTT over Secure WebSocket（wss://）")]
+        [SerializeField] private MqttV2TransportKind _kind = MqttV2TransportKind.Tcp;
+
+        [Tooltip("WebSocket のパス（Ws/Wss のみ）。省略すると '/' が使われます。ブローカーに合わせて設定してください（例: /mqtt）。")]
+        [SerializeField] private string _webSocketPath = "";
+
+        [Tooltip("WebSocket のサブプロトコル（Ws/Wss のみ）。省略すると 'mqtt' が使われます。")]
+        [SerializeField] private string _webSocketSubprotocol = "";
+
+        public MqttV2TransportOptions ToCoreOptions()
+        {
+            return new MqttV2TransportOptions(
+                kind: _kind,
+                webSocketPath: string.IsNullOrEmpty(_webSocketPath) ? null : _webSocketPath,
+                webSocketSubprotocol: string.IsNullOrEmpty(_webSocketSubprotocol) ? null : _webSocketSubprotocol);
+        }
+    }
+
+    [Serializable]
     public sealed class MqttV2BridgeConnectionSettings
     {
         [Header("Broker")]
@@ -125,6 +149,9 @@ namespace UnityMqtt.V2.Bridge
         [Tooltip("Delay before auto reconnect after disconnect (seconds). Keep this lower than Keep Alive for faster recovery.")]
         [SerializeField] private int _reconnectDelaySeconds = 5;
         [SerializeField] private bool _useCleanSession = true;
+
+        [Header("Transport")]
+        [SerializeField] private MqttV2BridgeTransportSettings _transportSettings = new MqttV2BridgeTransportSettings();
 
         [Header("Keep Alive")]
         [SerializeField] private MqttV2BridgeKeepAliveSettings _keepAliveSettings = new MqttV2BridgeKeepAliveSettings();
@@ -169,6 +196,10 @@ namespace UnityMqtt.V2.Bridge
                 ? _subscriptionSettings.ToCoreOptions()
                 : MqttV2SubscriptionDefaults.Default;
 
+            var transportOptions = _transportSettings != null
+                ? _transportSettings.ToCoreOptions()
+                : MqttV2TransportOptions.TcpDefault;
+
             return new MqttV2ConnectionOptions(
                 credentials: credentials,
                 keepAlive: keepAliveOptions,
@@ -176,7 +207,8 @@ namespace UnityMqtt.V2.Bridge
                 useCleanSession: _useCleanSession,
                 tls: tlsOptions,
                 will: willOptions,
-                subscriptionDefaults: subscriptionDefaults);
+                subscriptionDefaults: subscriptionDefaults,
+                transport: transportOptions);
         }
 
         internal void MigrateLegacyKeepAliveIfNeeded()

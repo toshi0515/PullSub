@@ -7,14 +7,12 @@ namespace UnityMqtt.V2.Core
         public MqttV2ClientProfile(
             string brokerHost,
             int brokerPort,
-            string payloadCodecId,
             MqttV2ClientIdPolicy clientIdPolicy,
             string fixedClientId = null,
             MqttV2ConnectionOptions connectionOptions = null)
         {
             BrokerHost = string.IsNullOrWhiteSpace(brokerHost) ? throw new ArgumentException("brokerHost is required.", nameof(brokerHost)) : brokerHost;
             BrokerPort = brokerPort > 0 ? brokerPort : throw new ArgumentOutOfRangeException(nameof(brokerPort));
-            PayloadCodecId = string.IsNullOrWhiteSpace(payloadCodecId) ? throw new ArgumentException("payloadCodecId is required.", nameof(payloadCodecId)) : payloadCodecId;
             ClientIdPolicy = clientIdPolicy;
             FixedClientId = fixedClientId;
             ConnectionOptions = connectionOptions ?? MqttV2ConnectionOptions.Default;
@@ -25,7 +23,6 @@ namespace UnityMqtt.V2.Core
 
         public string BrokerHost { get; }
         public int BrokerPort { get; }
-        public string PayloadCodecId { get; }
         public MqttV2ClientIdPolicy ClientIdPolicy { get; }
         public string FixedClientId { get; }
         public MqttV2ConnectionOptions ConnectionOptions { get; }
@@ -40,7 +37,6 @@ namespace UnityMqtt.V2.Core
 
             return string.Equals(BrokerHost, other.BrokerHost, StringComparison.Ordinal)
                 && BrokerPort == other.BrokerPort
-                && string.Equals(PayloadCodecId, other.PayloadCodecId, StringComparison.Ordinal)
                 && ClientIdPolicy == other.ClientIdPolicy
                 && string.Equals(FixedClientId, other.FixedClientId, StringComparison.Ordinal)
                 && Equals(ConnectionOptions, other.ConnectionOptions);
@@ -54,7 +50,6 @@ namespace UnityMqtt.V2.Core
             {
                 var hashCode = (BrokerHost != null ? StringComparer.Ordinal.GetHashCode(BrokerHost) : 0);
                 hashCode = (hashCode * 397) ^ BrokerPort;
-                hashCode = (hashCode * 397) ^ (PayloadCodecId != null ? StringComparer.Ordinal.GetHashCode(PayloadCodecId) : 0);
                 hashCode = (hashCode * 397) ^ (int)ClientIdPolicy;
                 hashCode = (hashCode * 397) ^ (FixedClientId != null ? StringComparer.Ordinal.GetHashCode(FixedClientId) : 0);
                 hashCode = (hashCode * 397) ^ (ConnectionOptions != null ? ConnectionOptions.GetHashCode() : 0);

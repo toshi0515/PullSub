@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+- WebSocket / Secure WebSocket トランスポート対応を追加（`MqttV2TransportKind.Ws` / `Wss`）
+
 ### Changed
+- **[BREAKING]** `MqttV2ClientRuntime` コンストラクタに `logWarning` 引数を `log` の直後に挿入。位置引数で `logError` を渡していたコードは `logWarning` に誤渡しされる。名前付き引数での呼び出しに変更してください。
 - **[BREAKING]** `PollRawAsync` を `ReceiveRawAsync` に改名
 
 ### Removed

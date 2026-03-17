@@ -16,16 +16,15 @@ namespace UnityMqtt.V2.Core
 
         private readonly IManagedMqttClient _client;
         private readonly MqttV2SubscriptionRegistry _subscriptions = new MqttV2SubscriptionRegistry();
-        private readonly MqttV2TopicUpdateModeStore _updateModeStore = new MqttV2TopicUpdateModeStore();
-        private readonly MqttV2DataCache _dataCache = new MqttV2DataCache();
+        private readonly TypedDataRegistry _typedDataRegistry = new TypedDataRegistry();
         private readonly MqttV2RawInbox _rawInbox = new MqttV2RawInbox();
         private readonly CancellationTokenSource _disposeCts = new CancellationTokenSource();
 
-        private readonly IMqttV2PayloadCodec _payloadCodec;
         private readonly MqttV2MessageDispatcher _messageDispatcher;
         private readonly MqttV2ShutdownCoordinator _shutdownCoordinator;
 
         private readonly Action<string> _log;
+        private readonly Action<string> _logWarning;
         private readonly Action<string> _logError;
         private readonly Action<Exception> _logException;
         private TaskCompletionSource<bool> _readySignal = CreateReadySignal();
@@ -36,27 +35,22 @@ namespace UnityMqtt.V2.Core
 
         public MqttV2ClientRuntime(
             MqttV2ClientProfile profile,
-            IMqttV2PayloadCodec payloadCodec,
             Action<string> log = null,
+            Action<string> logWarning = null,
             Action<string> logError = null,
             Action<Exception> logException = null)
         {
             Profile = profile ?? throw new ArgumentNullException(nameof(profile));
-            _payloadCodec = payloadCodec ?? throw new ArgumentNullException(nameof(payloadCodec));
-
-            if (!string.Equals(Profile.PayloadCodecId, _payloadCodec.Id, StringComparison.Ordinal))
-                throw new ArgumentException("profile.PayloadCodecId must match payloadCodec.Id.", nameof(payloadCodec));
 
             _log = log ?? (_ => { });
+            _logWarning = logWarning ?? (_ => { });
             _logError = logError ?? (_ => { });
             _logException = logException ?? (_ => { });
             _shutdownCoordinator = new MqttV2ShutdownCoordinator(_logError);
             _messageDispatcher = new MqttV2MessageDispatcher(
                 _subscriptions,
+                _typedDataRegistry,
                 _rawInbox,
-                _dataCache,
-                _updateModeStore,
-                _payloadCodec,
                 _logError,
                 _logException);
 
@@ -143,13 +137,15 @@ namespace UnityMqtt.V2.Core
                 try
                 {
                     var clientId = CreateClientId();
-                    _log($"[MQTT-V2] Starting. clientId={clientId} broker={Profile.BrokerHost}:{Profile.BrokerPort}");
+                    var transport = Profile.ConnectionOptions.Transport;
+                    _log($"[MQTT-V2] Starting. clientId={clientId} broker={Profile.BrokerHost}:{Profile.BrokerPort} transport={transport.Kind}");
 
                     // ManagedClient reuses the same options for automatic reconnect cycles.
                     var managedOptions = MqttV2RuntimeClientOptionsFactory.Build(
                         Profile,
                         Profile.ConnectionOptions,
-                        clientId);
+                        clientId,
+                        logWarning: _logWarning);
 
                     await MqttV2AsyncUtils.AwaitWithCancellation(_client.StartAsync(managedOptions), operationToken);
                     await ResubscribeAllTopicsAsync(operationToken);
@@ -272,7 +268,7 @@ namespace UnityMqtt.V2.Core
             try
             {
                 _rawInbox.Clear();
-                _dataCache.Clear();
+                _typedDataRegistry.CancelAll();
             }
             catch (Exception ex)
             {
@@ -322,8 +318,10 @@ namespace UnityMqtt.V2.Core
                     return;
 
                 SetState(MqttV2ClientState.ResubscribePending);
-                var topics = _subscriptions.SnapshotTopics();
-                foreach (var topic in topics)
+                var topicSet = new System.Collections.Generic.HashSet<string>(_subscriptions.SnapshotTopics(), StringComparer.Ordinal);
+                foreach (var t in _typedDataRegistry.SnapshotTopics())
+                    topicSet.Add(t);
+                foreach (var topic in topicSet)
                     await SubscribeNetworkAsync(topic, cancellationToken);
 
                 SetState(MqttV2ClientState.Ready);
@@ -409,6 +407,12 @@ namespace UnityMqtt.V2.Core
             {
                 linkedCts = null;
                 return _disposeCts.Token;
+            }
+
+            if (cancellationToken == _disposeCts.Token || cancellationToken.IsCancellationRequested)
+            {
+                linkedCts = null;
+                return cancellationToken;
             }
 
             try
