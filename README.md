@@ -665,7 +665,7 @@ var willOptions = new MqttV2WillOptions(
     enabled: true,
     topic: "robot/status",
     payloadUtf8: "{\"status\":\"offline\",\"reason\":\"unexpected_disconnect\"}",
-    qos: MqttQualityOfServiceLevel.AtLeastOnce,
+    qos: MqttV2QualityOfServiceLevel.AtLeastOnce,
     retain: true);  // 最後の LWT を保持して新規購読者に通知
 
 var profile = new MqttV2ClientProfile(
@@ -738,7 +738,7 @@ var profile = new MqttV2ClientProfile(
     brokerPort: 1883,
     clientIdPolicy: MqttV2ClientIdPolicy.RandomPerStart,
     connectionOptions: new MqttV2ConnectionOptions(
-        subscriptionDefaults: new MqttV2SubscriptionDefaults(MqttQualityOfServiceLevel.AtLeastOnce)));
+        subscriptionDefaults: new MqttV2SubscriptionDefaults(MqttV2QualityOfServiceLevel.AtLeastOnce)));
 
 await using var runtime = new MqttV2ClientRuntime(profile);
 
@@ -749,7 +749,7 @@ await runtime.SubscribeDataAsync<ImuData>("sensor/critical", MqttV2JsonPayloadCo
 await runtime.SubscribeDataAsync<ImuData>(
     "sensor/critical-high",
     MqttV2JsonPayloadCodec<ImuData>.Default,
-    MqttQualityOfServiceLevel.ExactlyOnce,
+    MqttV2QualityOfServiceLevel.ExactlyOnce,
     cts.Token);
 ```
 
