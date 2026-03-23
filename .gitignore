@@ -19,12 +19,19 @@ omnisharp.json
 artifacts/
 src/**/*.meta
 
-# Unity
+# Unity & .NET standard build outputs
 [Ll]ibrary/
 [Tt]emp/
 [Oo]bj/
+[Bb]in/
 [Bb]uild/
 [Bb]uilds/
 [Ll]ogs/
 *.pidb.meta
 *.pdb.meta
+
+# Unity DLL dependencies (install manually or via NuGet for Unity)
+unity/Runtime/Core/Plugins/*.dll
+unity/Runtime/Core/Plugins/*.dll.meta
+unity/Runtime/Mqtt/Plugins/*.dll
+unity/Runtime/Mqtt/Plugins/*.dll.meta
