@@ -1,6 +1,6 @@
 {
     "name": "PullSub.Mqtt",
-    "rootNamespace": "PullSub.Core",
+    "rootNamespace": "PullSub.Mqtt",
     "references": [
         "PullSub.Core"
     ],
