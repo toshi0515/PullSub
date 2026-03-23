@@ -1,0 +1,17 @@
+{
+    "name": "PullSub.Bridge",
+    "rootNamespace": "PullSub.Bridge",
+    "references": [
+        "PullSub.Core",
+        "PullSub.Mqtt"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

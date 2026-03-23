@@ -9,12 +9,15 @@ Thumbs.db
 *.suo
 *.user
 
-# Local development .csproj / .sln (machine-specific paths, not for UPM consumers)
+# Local development .csproj / .sln / .slnx (machine-specific paths, not for UPM consumers)
 *.csproj
 *.sln
+*.slnx
 omnisharp.json
-InternalsVisibleTo.cs
-InternalsVisibleTo.cs.meta
+
+# .NET build output (redirected here from src/ to avoid Unity DLL conflicts)
+artifacts/
+src/**/*.meta
 
 # Unity
 [Ll]ibrary/

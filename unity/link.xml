@@ -1,0 +1,8 @@
+<linker>
+  <assembly fullname="PullSub.Core" preserve="all" />
+  <assembly fullname="PullSub.Bridge" preserve="all" />
+
+  <assembly fullname="System.Text.Json" preserve="all" />
+
+  <assembly fullname="MQTTnet" preserve="all" />
+</linker>
