@@ -364,37 +364,6 @@ namespace PullSub.Core
         }
     }
 
-    public sealed class MqttSubscriptionDefaults : IEquatable<MqttSubscriptionDefaults>
-    {
-        public static MqttSubscriptionDefaults Default { get; }
-            = new MqttSubscriptionDefaults(PullSubQualityOfServiceLevel.AtMostOnce);
-
-        public MqttSubscriptionDefaults(PullSubQualityOfServiceLevel subscribeQos)
-        {
-            if (!Enum.IsDefined(typeof(PullSubQualityOfServiceLevel), subscribeQos))
-                throw new ArgumentOutOfRangeException(nameof(subscribeQos));
-
-            SubscribeQos = subscribeQos;
-        }
-
-        public PullSubQualityOfServiceLevel SubscribeQos { get; }
-
-        public bool Equals(MqttSubscriptionDefaults other)
-        {
-            if (ReferenceEquals(null, other))
-                return false;
-
-            if (ReferenceEquals(this, other))
-                return true;
-
-            return SubscribeQos == other.SubscribeQos;
-        }
-
-        public override bool Equals(object obj) => Equals(obj as MqttSubscriptionDefaults);
-
-        public override int GetHashCode() => (int)SubscribeQos;
-    }
-
     public sealed class MqttConnectionOptions : IEquatable<MqttConnectionOptions>
     {
         public static MqttConnectionOptions Default { get; } = new MqttConnectionOptions();
@@ -406,7 +375,6 @@ namespace PullSub.Core
             bool useCleanSession = true,
             MqttTlsOptions tls = null,
             MqttWillOptions will = null,
-            MqttSubscriptionDefaults subscriptionDefaults = null,
             MqttTransportOptions transport = null)
             : this(
                 credentials,
@@ -415,7 +383,6 @@ namespace PullSub.Core
                 useCleanSession,
                 tls,
                 will,
-                subscriptionDefaults,
                 transport)
         {
         }
@@ -427,7 +394,6 @@ namespace PullSub.Core
             bool useCleanSession = true,
             MqttTlsOptions tls = null,
             MqttWillOptions will = null,
-            MqttSubscriptionDefaults subscriptionDefaults = null,
             MqttTransportOptions transport = null)
         {
             if (reconnectDelaySeconds < 1)
@@ -439,7 +405,6 @@ namespace PullSub.Core
             UseCleanSession = useCleanSession;
             Tls = tls ?? MqttTlsOptions.Disabled;
             Will = will ?? MqttWillOptions.Disabled;
-            SubscriptionDefaults = subscriptionDefaults ?? MqttSubscriptionDefaults.Default;
             Transport = transport ?? MqttTransportOptions.TcpDefault;
         }
 
@@ -450,7 +415,6 @@ namespace PullSub.Core
         public bool UseCleanSession { get; }
         public MqttTlsOptions Tls { get; }
         public MqttWillOptions Will { get; }
-        public MqttSubscriptionDefaults SubscriptionDefaults { get; }
         public MqttTransportOptions Transport { get; }
 
         public bool Equals(MqttConnectionOptions other)
@@ -467,7 +431,6 @@ namespace PullSub.Core
                 && UseCleanSession == other.UseCleanSession
                 && Equals(Tls, other.Tls)
                 && Equals(Will, other.Will)
-                && Equals(SubscriptionDefaults, other.SubscriptionDefaults)
                 && Equals(Transport, other.Transport);
         }
 
@@ -483,7 +446,6 @@ namespace PullSub.Core
                 hashCode = (hashCode * 397) ^ UseCleanSession.GetHashCode();
                 hashCode = (hashCode * 397) ^ (Tls != null ? Tls.GetHashCode() : 0);
                 hashCode = (hashCode * 397) ^ (Will != null ? Will.GetHashCode() : 0);
-                hashCode = (hashCode * 397) ^ (SubscriptionDefaults != null ? SubscriptionDefaults.GetHashCode() : 0);
                 hashCode = (hashCode * 397) ^ (Transport != null ? Transport.GetHashCode() : 0);
                 return hashCode;
             }

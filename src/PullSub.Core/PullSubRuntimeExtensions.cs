@@ -14,7 +14,7 @@ namespace PullSub.Core
             return runtime.SubscribeDataAsync<T>(
                 topic,
                 PullSubJsonPayloadCodec<T>.Default,
-                cancellationToken);
+                cancellationToken: cancellationToken);
         }
 
         public static Task SubscribeDataAsync<T>(
@@ -52,6 +52,19 @@ namespace PullSub.Core
                 .ConfigureAwait(false);
 
             return DecodeOrThrow(topic, message.Payload, codec);
+        }
+
+        public static Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync<T>(
+            this PullSubRuntime runtime,
+            IPullSubTopic<T> topic,
+            Func<T, CancellationToken, Task> handler,
+            CancellationToken cancellationToken = default)
+        {
+            return runtime.RegisterHandlerLeaseAsync(
+                topic,
+                PullSubQueueOptions.Default,
+                handler,
+                cancellationToken);
         }
 
         public static Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync<T>(
@@ -283,7 +296,7 @@ namespace PullSub.Core
                 if (subscribeQos.HasValue)
                     await runtime.SubscribeQueueAsync(topic, options, subscribeQos.Value, cancellationToken);
                 else
-                    await runtime.SubscribeQueueAsync(topic, options, cancellationToken);
+                    await runtime.SubscribeQueueAsync(topic, options, cancellationToken: cancellationToken);
 
                 startedSignal?.TrySetResult(true);
 
@@ -330,7 +343,7 @@ namespace PullSub.Core
             return runtime.SubscribeDataAsync<T>(
                 topic.TopicName,
                 topic.Codec,
-                cancellationToken);
+                cancellationToken: cancellationToken);
         }
 
         public static Task SubscribeDataAsync<T>(

@@ -48,19 +48,10 @@ namespace PullSub.Core
             return PublishRawAsync(topic, bytes, qos, retain, cancellationToken);
         }
 
-        public Task SubscribeQueueAsync(
-            string topic,
-            PullSubQueueOptions options,
-            CancellationToken cancellationToken = default)
-        {
-            var subscribeQos = Profile.ConnectionOptions.SubscriptionDefaults.SubscribeQos;
-            return SubscribeQueueAsync(topic, options, subscribeQos, cancellationToken);
-        }
-
         public async Task SubscribeQueueAsync(
             string topic,
             PullSubQueueOptions options,
-            PullSubQualityOfServiceLevel subscribeQos,
+            PullSubQualityOfServiceLevel subscribeQos = PullSubQualityOfServiceLevel.AtLeastOnce,
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
@@ -128,25 +119,10 @@ namespace PullSub.Core
             }
         }
 
-        /// <summary>
-        /// 型付きデータ購読を開始します。同一トピックへの複数回呼び出しは refcount でまとめられます。
-        /// 同一トピックへ再登録する場合、Codec は同値（<see cref="object.Equals(object)"/>）である必要があります。
-        /// 同一トピックへ再登録する場合、Subscribe QoS も同一である必要があります。
-        /// 解除するには <see cref="UnsubscribeDataAsync"/> を呼んでください。
-        /// </summary>
-        public Task SubscribeDataAsync<T>(
-            string topic,
-            IPayloadCodec<T> codec,
-            CancellationToken cancellationToken = default)
-        {
-            var subscribeQos = Profile.ConnectionOptions.SubscriptionDefaults.SubscribeQos;
-            return SubscribeDataAsync(topic, codec, subscribeQos, cancellationToken);
-        }
-
         public async Task SubscribeDataAsync<T>(
             string topic,
             IPayloadCodec<T> codec,
-            PullSubQualityOfServiceLevel subscribeQos,
+            PullSubQualityOfServiceLevel subscribeQos = PullSubQualityOfServiceLevel.AtLeastOnce,
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();

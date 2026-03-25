@@ -99,18 +99,6 @@ namespace PullSub.Bridge
     }
 
     [Serializable]
-    public sealed class PullSubSubscriptionSettings
-    {
-        [Tooltip("QoS level used for all subscribe requests.")]
-        [SerializeField] private PullSubQualityOfServiceLevel _subscribeQos = PullSubQualityOfServiceLevel.AtMostOnce;
-
-        public MqttSubscriptionDefaults ToCoreOptions()
-        {
-            return new MqttSubscriptionDefaults(_subscribeQos);
-        }
-    }
-
-    [Serializable]
     public sealed class PullSubClientTransportSettings
     {
         [Tooltip("接続トランスポートプロトコルを選択します。\nTcp: MQTT over TCP（既定）\nWs: MQTT over WebSocket（ws://）\nWss: MQTT over Secure WebSocket（wss://）")]
@@ -158,9 +146,6 @@ namespace PullSub.Bridge
         [Header("Will (LWT)")]
         [SerializeField] private PullSubClientWillSettings _willSettings = new PullSubClientWillSettings();
 
-        [Header("Subscriptions")]
-        [SerializeField] private PullSubSubscriptionSettings _subscriptionSettings = new PullSubSubscriptionSettings();
-
         [FormerlySerializedAs("_keepAliveSeconds")]
         [SerializeField] [HideInInspector] private int _legacyKeepAliveSeconds = MqttKeepAliveOptions.DefaultSeconds;
         [SerializeField] [HideInInspector] private bool _legacyKeepAliveMigrated;
@@ -191,10 +176,6 @@ namespace PullSub.Bridge
                 ? _willSettings.ToCoreOptions()
                 : MqttWillOptions.Disabled;
 
-            var subscriptionDefaults = _subscriptionSettings != null
-                ? _subscriptionSettings.ToCoreOptions()
-                : MqttSubscriptionDefaults.Default;
-
             var transportOptions = _transportSettings != null
                 ? _transportSettings.ToCoreOptions()
                 : MqttTransportOptions.TcpDefault;
@@ -206,7 +187,6 @@ namespace PullSub.Bridge
                 useCleanSession: _useCleanSession,
                 tls: tlsOptions,
                 will: willOptions,
-                subscriptionDefaults: subscriptionDefaults,
                 transport: transportOptions);
         }
 

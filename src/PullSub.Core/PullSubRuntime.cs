@@ -31,13 +31,11 @@ namespace PullSub.Core
 
         public PullSubRuntime(
             ITransport transport,
-            MqttClientProfile profile,
             Action<string> log = null,
             Action<string> logWarning = null,
             Action<string> logError = null,
             Action<Exception> logException = null)
         {
-            Profile = profile ?? throw new ArgumentNullException(nameof(profile));
             _transport = transport ?? throw new ArgumentNullException(nameof(transport));
             _log = log ?? (_ => { });
             _logWarning = logWarning ?? (_ => { });
@@ -55,8 +53,6 @@ namespace PullSub.Core
             _transport.OnDisconnected = HandleDisconnectedAsync;
             _transport.OnMessageReceived = HandleMessageReceivedAsync;
         }
-
-        public MqttClientProfile Profile { get; }
 
         public PullSubState State
         {
@@ -132,8 +128,7 @@ namespace PullSub.Core
                 _suppressConnectedResubscribe = true;
                 try
                 {
-                    var transport = Profile.ConnectionOptions.Transport;
-                    _log($"[PullSubRuntime] Starting. broker={Profile.BrokerHost}:{Profile.BrokerPort}");
+                    _log($"[PullSubRuntime] Starting.");
 
                     await _transport.StartAsync(operationToken);
                     await ResubscribeAllTopicsAsync(operationToken);

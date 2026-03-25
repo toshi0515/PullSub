@@ -209,7 +209,6 @@ namespace PullSub.Bridge
 
             Runtime = new PullSubRuntime(
                 transport: new MqttTransport(profile, connectionOptions),
-                profile,
                 log: message => Debug.Log(message),
                 logWarning: message => Debug.LogWarning(message),
                 logError: message => Debug.LogError(message),
