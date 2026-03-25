@@ -17,6 +17,18 @@ namespace PullSub.Core
         public T Value => _runtime.TryGetData<T>(_topic, out var v) ? v : default;
 
         /// <summary>
+        /// 最新データの発生時刻（世界標準時）を返します。
+        /// JSON ペイロードに timestamp が含まれていればそれを、なければ受信時刻を返します。
+        /// データ未到着の場合は default(DateTime) を返します。
+        /// </summary>
+        public System.DateTime TimestampUtc => _runtime.TryGetData<T>(_topic, out _, out var ts) ? ts : default;
+
+        /// <summary>
+        /// 端末のローカル時間に変換された発生時刻を返します。
+        /// </summary>
+        public System.DateTime TimestampLocal => TimestampUtc.ToLocalTime();
+
+        /// <summary>
         /// データが一度でも到着しているかどうか。
         /// </summary>
         public bool HasValue => _runtime.TryGetData<T>(_topic, out _);

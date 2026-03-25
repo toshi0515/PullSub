@@ -71,7 +71,7 @@ namespace PullSub.Core
                 throw;
             }
 
-            if (_subscriptions.IsRawRegistered(topic))
+            if (_subscriptions.IsQueueSubRegistered(topic))
             {
                 _subscriptionGate.Release();
                 linkedCts?.Dispose();
@@ -79,7 +79,7 @@ namespace PullSub.Core
                     $"Topic '{topic}' is already subscribed as Queue. Call UnsubscribeQueueAsync first.");
             }
 
-            var shouldNetworkSubscribe = _subscriptions.RegisterRaw(topic, subscribeQos);
+            var shouldNetworkSubscribe = _subscriptions.RegisterQueueSub(topic, subscribeQos);
             try
             {
                 try
@@ -88,7 +88,7 @@ namespace PullSub.Core
                 }
                 catch
                 {
-                    _subscriptions.UnregisterRaw(topic);
+                    _subscriptions.UnregisterQueueSub(topic);
                     throw;
                 }
 
@@ -100,9 +100,9 @@ namespace PullSub.Core
                     }
                     catch
                     {
-                        _subscriptions.UnregisterRaw(topic);
+                        _subscriptions.UnregisterQueueSub(topic);
 
-                        if (!_subscriptions.IsRawRegistered(topic))
+                        if (!_subscriptions.IsQueueSubRegistered(topic))
                             _rawInbox.RemoveTopic(topic);
 
                         if (_subscriptions.TryGetSubscribeQos(topic, out var fallbackSubscribeQos))
@@ -145,7 +145,7 @@ namespace PullSub.Core
                 {
                     _typedDataRegistry.Register<T>(topic, codec, out _);
                     typedRegistered = true;
-                    networkRegistered = _subscriptions.RegisterData(topic, subscribeQos);
+                    networkRegistered = _subscriptions.RegisterDataSub(topic, subscribeQos);
                 }
                 catch
                 {
@@ -163,7 +163,7 @@ namespace PullSub.Core
                     catch
                     {
                         _typedDataRegistry.Unregister(topic);
-                        _subscriptions.UnregisterData(topic);
+                        _subscriptions.UnregisterDataSub(topic);
 
                         if (_subscriptions.TryGetSubscribeQos(topic, out var fallbackSubscribeQos))
                             _ = EnsureNetworkSubscriptionConsistencyAsync(topic, fallbackSubscribeQos);
@@ -197,10 +197,10 @@ namespace PullSub.Core
                 throw;
             }
 
-            var shouldNetworkUnsubscribe = _subscriptions.UnregisterRaw(topic);
+            var shouldNetworkUnsubscribe = _subscriptions.UnregisterQueueSub(topic);
             try
             {
-                if (!_subscriptions.IsRawRegistered(topic))
+                if (!_subscriptions.IsQueueSubRegistered(topic))
                     _rawInbox.RemoveTopic(topic);
 
                 if (shouldNetworkUnsubscribe && _transport.IsConnected)
@@ -232,7 +232,7 @@ namespace PullSub.Core
             }
 
             _typedDataRegistry.Unregister(topic);
-            var shouldNetworkUnsubscribe = _subscriptions.UnregisterData(topic);
+            var shouldNetworkUnsubscribe = _subscriptions.UnregisterDataSub(topic);
             try
             {
                 if (shouldNetworkUnsubscribe && _transport.IsConnected)

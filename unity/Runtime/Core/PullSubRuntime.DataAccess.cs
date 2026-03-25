@@ -36,10 +36,20 @@ namespace PullSub.Core
         /// </summary>
         public bool TryGetData<T>(string topic, out T value)
         {
+            return TryGetData<T>(topic, out value, out _);
+        }
+
+        /// <summary>
+        /// 最後に受信したデータを、受信発生時刻(またはペイロード時刻)と共に取得します。
+        /// SubscribeDataAsync&lt;T&gt; で購読済みであることが前提です。
+        /// </summary>
+        public bool TryGetData<T>(string topic, out T value, out System.DateTime timestampUtc)
+        {
             if (_typedDataRegistry.TryGetCache<T>(topic, out var cache))
-                return cache.TryGet(out value);
+                return cache.TryGet(out value, out timestampUtc);
 
             value = default;
+            timestampUtc = default;
             return false;
         }
 

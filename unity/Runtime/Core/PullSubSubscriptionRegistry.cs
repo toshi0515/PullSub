@@ -3,27 +3,22 @@ using System.Collections.Generic;
 
 namespace PullSub.Core
 {
-    /// <summary>
-    /// Raw 購読のトピック参照カウントを管理します。
-    /// 型付きデータ購読は <see cref="TypedDataRegistry"/> が担います。
-    /// </summary>
     internal sealed class PullSubSubscriptionRegistry
     {
         private sealed class TopicCounter
         {
-            public int RawCount;
-            public int DataCount;
+            public int QueueSubCount;
+            public int DataSubCount;
             public PullSubQualityOfServiceLevel SubscribeQos;
 
-            public int TotalCount => RawCount + DataCount;
+            public int TotalCount => QueueSubCount + DataSubCount;
         }
 
         private readonly object _gate = new object();
         private readonly Dictionary<string, TopicCounter> _topics
             = new Dictionary<string, TopicCounter>(StringComparer.Ordinal);
 
-        /// <returns>true のとき、このトピックの最初の登録（ネットワーク購読すべき）</returns>
-        public bool RegisterRaw(string topic, PullSubQualityOfServiceLevel subscribeQos)
+        public bool RegisterQueueSub(string topic, PullSubQualityOfServiceLevel subscribeQos)
         {
             ValidateExactMatchTopic(topic);
             ValidateSubscribeQos(subscribeQos);
@@ -42,13 +37,12 @@ namespace PullSub.Core
                 }
 
                 var before = counter.TotalCount;
-                counter.RawCount++;
+                counter.QueueSubCount++;
                 return before == 0;
             }
         }
 
-        /// <returns>true のとき、このトピックの最初の登録（ネットワーク購読すべき）</returns>
-        public bool RegisterData(string topic, PullSubQualityOfServiceLevel subscribeQos)
+        public bool RegisterDataSub(string topic, PullSubQualityOfServiceLevel subscribeQos)
         {
             ValidateExactMatchTopic(topic);
             ValidateSubscribeQos(subscribeQos);
@@ -67,22 +61,21 @@ namespace PullSub.Core
                 }
 
                 var before = counter.TotalCount;
-                counter.DataCount++;
+                counter.DataSubCount++;
                 return before == 0;
             }
         }
 
-        /// <returns>true のとき、参照がなくなった（ネットワーク購読解除すべき）</returns>
-        public bool UnregisterRaw(string topic)
+        public bool UnregisterQueueSub(string topic)
         {
             ValidateExactMatchTopic(topic);
 
             lock (_gate)
             {
-                if (!_topics.TryGetValue(topic, out var counter) || counter.RawCount <= 0)
+                if (!_topics.TryGetValue(topic, out var counter) || counter.QueueSubCount <= 0)
                     return false;
 
-                counter.RawCount--;
+                counter.QueueSubCount--;
                 if (counter.TotalCount <= 0)
                 {
                     _topics.Remove(topic);
@@ -92,17 +85,16 @@ namespace PullSub.Core
             }
         }
 
-        /// <returns>true のとき、参照がなくなった（ネットワーク購読解除すべき）</returns>
-        public bool UnregisterData(string topic)
+        public bool UnregisterDataSub(string topic)
         {
             ValidateExactMatchTopic(topic);
 
             lock (_gate)
             {
-                if (!_topics.TryGetValue(topic, out var counter) || counter.DataCount <= 0)
+                if (!_topics.TryGetValue(topic, out var counter) || counter.DataSubCount <= 0)
                     return false;
 
-                counter.DataCount--;
+                counter.DataSubCount--;
                 if (counter.TotalCount <= 0)
                 {
                     _topics.Remove(topic);
@@ -112,11 +104,11 @@ namespace PullSub.Core
             }
         }
 
-        public bool IsRawRegistered(string topic)
+        public bool IsQueueSubRegistered(string topic)
         {
             lock (_gate)
             {
-                return _topics.TryGetValue(topic, out var counter) && counter.RawCount > 0;
+                return _topics.TryGetValue(topic, out var counter) && counter.QueueSubCount > 0;
             }
         }
 

@@ -40,16 +40,18 @@ namespace PullSub.Core
             signalToComplete?.TrySetResult(value);
         }
 
-        public bool TryGet(out T value)
+        public bool TryGet(out T value, out DateTime timestampUtc)
         {
             lock (_gate)
             {
                 if (_hasValue)
                 {
                     value = _latest;
+                    timestampUtc = _latestTimestampUtc;
                     return true;
                 }
                 value = default;
+                timestampUtc = default;
                 return false;
             }
         }

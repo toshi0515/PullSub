@@ -31,7 +31,7 @@ namespace PullSub.Core
 
             try
             {
-                var hasRaw = _subscriptions.IsRawRegistered(topic);
+                var hasRaw = _subscriptions.IsQueueSubRegistered(topic);
                 var hasData = _typedDataRegistry.IsRegistered(topic);
 
                 if (!hasRaw && !hasData)
