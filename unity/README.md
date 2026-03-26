@@ -85,7 +85,18 @@ PullSub abstracts transport protocols behind `ITransport`. You can use protocols
 
 ## When PullSub is not the right fit
 
-- **You need callbacks:** Use [MQTTnet](https://github.com/dotnet/MQTTnet) directly. PullSub is designed for pulling data on demand, not for event-driven callback patterns.
+- **You need callbacks:** Use the Queue API's `RegisterHandlerLeaseAsync` instead.
+  It provides callback-style message handling with async support, backpressure,
+  and drop detection — everything a raw callback pattern lacks.
+```csharp
+  _registration = await runtime.RegisterHandlerLeaseAsync(
+      PositionTopic.Default,
+      async (pos, ct) =>
+      {
+          await UniTask.SwitchToMainThread();
+          transform.position = pos.ToVector3();
+      });
+```
 - **You need wildcard topics:** Wildcard topics (`sensors/+/temperature`, `devices/#`) are not supported. PullSub requires exact-match topic strings.
 
 ---

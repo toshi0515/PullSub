@@ -13,6 +13,10 @@ Thumbs.db
 *.csproj
 *.sln
 *.slnx
+unity/Runtime/Core/*.csproj
+unity/Runtime/Mqtt/*.csproj
+unity/Runtime/Core/*.asmdef.meta
+unity/Runtime/Mqtt/*.asmdef.meta
 # ただし、手動で作成した src/ と tests/ 以下のプロジェクトファイルは Git 管理に含める
 !src/**/*.csproj
 !tests/**/*.csproj
