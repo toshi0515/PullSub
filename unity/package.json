@@ -1,17 +1,20 @@
 {
-  "name": "com.toshi0515.unity-mqtt",
+  "name": "com.toshi0515.pullsub",
   "version": "1.0.0",
-  "displayName": "Unity MQTT Client",
-  "description": "Unity MQTT client package targeting MQTTnet v4.3.7. Provides a thin runtime wrapper, typed payload codecs with System.Text.Json, and Publish/Subscribe helpers without built-in reactive or main-thread dispatch dependencies.",
+  "displayName": "PullSub",
+  "description": "Pull-style typed Pub/Sub runtime for Unity and .NET. Supports MQTTnet v4.3.x and MQTTnet.Extensions.ManagedClient v4.3.x.",
   "unity": "2022.3",
   "dependencies": {},
   "author": {
-    "name": "toshi0515"
+    "name": "toshi0515",
+    "url": "https://github.com/Toshi-0515"
   },
   "keywords": [
     "mqtt",
     "mqttnet",
     "iot",
-    "networking"
-  ]
+    "networking",
+    "pubsub"
+  ],
+  "license": "MIT"
 }
