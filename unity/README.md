@@ -138,6 +138,8 @@ var registration = await runtime.RegisterHandlerLeaseAsync(
 
 Installing DLLs via [NuGet for Unity](https://github.com/GlitchEnzo/NuGetForUnity) is recommended, or place them manually in your `Assets/Plugins` folder.
 
+<img width="571" height="556" alt="image" src="https://github.com/user-attachments/assets/7fa6bc3a-574e-46c7-aa81-c3b1129852a1" />
+
 **Core**
 - `System.Text.Json.dll` (8.0.x)
 - `System.Text.Encodings.Web.dll` (8.0.x)
@@ -151,7 +153,7 @@ Installing DLLs via [NuGet for Unity](https://github.com/GlitchEnzo/NuGetForUnit
 
 Install via UPM with a git URL:
 ```
-https://github.com/Toshi-0515/pullsub.git?path=unity
+https://github.com/toshi0515/PullSub.git?path=unity
 ```
 
 ### .NET (NuGet)
