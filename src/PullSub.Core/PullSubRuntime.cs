@@ -283,10 +283,14 @@ namespace PullSub.Core
                 return;
             }
 
+            _log("[PullSubRuntime] Disconnecting...");
+
             // Set Stopped before StopAsync so that the DisconnectedAsync event fired by MQTTnet
             // during the clean disconnect is treated as intentional and suppressed in OnDisconnected.
             SetState(PullSubState.Stopped);
             await _transport.StopAsync(true, cancellationToken);
+
+            _log("[PullSubRuntime] Disconnected.");
         }
 
         private async Task ResubscribeAllTopicsAsync(CancellationToken cancellationToken)
@@ -300,8 +304,13 @@ namespace PullSub.Core
                 if (IsDisposeRequested)
                     return;
 
+                var topics = _subscriptions.SnapshotTopics();
+                if (topics.Length > 0)
+                    _log($"[PullSubRuntime] Resubscribing {topics.Length} topic(s).");
+
+
                 SetState(PullSubState.ResubscribePending);
-                foreach (var topic in _subscriptions.SnapshotTopics())
+                foreach (var topic in topics)
                 {
                     if (!_subscriptions.TryGetSubscribeQos(topic, out var subscribeQos))
                         continue;
@@ -310,6 +319,9 @@ namespace PullSub.Core
                 }
 
                 SetState(PullSubState.Ready);
+
+                if (topics.Length > 0)
+                    _log("[PullSubRuntime] Resubscribe completed.");
             }
             finally
             {

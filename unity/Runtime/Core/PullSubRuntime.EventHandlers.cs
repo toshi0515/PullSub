@@ -42,7 +42,7 @@ namespace PullSub.Core
 
             SetState(PullSubState.Reconnecting);
 
-            _logError($"[PullSubRuntime] Disconnected. Reason={reason}");
+            _logWarning($"[PullSubRuntime] Disconnected. Reason={reason}");
             return Task.CompletedTask;
         }
 
