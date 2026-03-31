@@ -1,7 +1,8 @@
 using System;
 using System.Security.Authentication;
+using PullSub.Core; 
 
-namespace PullSub.Core
+namespace PullSub.Mqtt
 {
     public enum MqttTransportKind
     {

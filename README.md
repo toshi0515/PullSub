@@ -32,9 +32,9 @@ public sealed class Position
     public float Z { get; set; }
 }
 
-public static class PositionTopic
+public static class Topics
 {
-    public static readonly IPullSubTopic<Position> Default
+    public static readonly IPullSubTopic<Position> Position
         = PullSubTopic.Create<Position>("robot/position");
 }
 ```
@@ -52,15 +52,17 @@ public class RobotController : MonoBehaviour
     {
         _cts = new CancellationTokenSource();
 
-        await _client.Runtime.SubscribeDataAsync(PositionTopic.Default, _cts.Token);
+        await _client.Runtime.SubscribeDataAsync(Topics.Position, _cts.Token);
 
-        _positionHandle = _client.Runtime.GetDataHandle(PositionTopic.Default);
+        await _client.Runtime.WaitForFirstDataAsync(Topics.Position, _cts.Token);
+
+        _positionHandle = _client.Runtime.GetDataHandle(Topics.Position);
     }
 
     private void Update()
     {
+        if (_positionHandle == null) return;
         // Access the latest value just like transform.position
-        if (!_positionHandle.HasValue) return;
         var pos = _positionHandle.Value;
         transform.position = new Vector3(pos.X, pos.Y, pos.Z);
     }
@@ -90,7 +92,7 @@ PullSub abstracts transport protocols behind `ITransport`. You can use protocols
   and drop detection — everything a raw callback pattern lacks.
 ```csharp
   _registration = await runtime.RegisterHandlerLeaseAsync(
-      PositionTopic.Default,
+      Topics.Position,
       async (pos, ct) =>
       {
           await UniTask.SwitchToMainThread();
@@ -113,7 +115,6 @@ Use this for data where only the latest value matters, such as IoT sensor readin
 // Poll in Update() — just like transform.position
 private void Update()
 {
-    if (!_positionHandle.HasValue) return;
     var pos = _positionHandle.Value;
     transform.position = new Vector3(pos.X, pos.Y, pos.Z);
 }
@@ -126,7 +127,7 @@ Use this for data where every message must be processed in order, such as comman
 ```csharp
 // Handle commands one by one
 var registration = await runtime.RegisterHandlerLeaseAsync(
-    RobotCommandTopic.Default,
+    Topics.Command,
     async (command, ct) => await robot.ExecuteAsync(command, ct));
 ```
 
@@ -176,7 +177,7 @@ Add `PullSubMqttClient` to a GameObject and configure the broker settings in the
 Define your data type and topic in a single file.
 
 ```csharp
-// Position.cs
+// Types.cs
 public sealed class Position
 {
     public float X { get; set; }
@@ -184,9 +185,10 @@ public sealed class Position
     public float Z { get; set; }
 }
 
-public static class PositionTopic
+// Topics.cs
+public static class Topics
 {
-    public static readonly IPullSubTopic<Position> Default
+    public static readonly IPullSubTopic<Position> Position
         = PullSubTopic.Create<Position>("robot/position");
 }
 ```
@@ -214,18 +216,18 @@ public class RobotController : MonoBehaviour
         await _client.Runtime.WaitUntilConnectedAsync(_cts.Token);
 
         // Subscribe
-        await _client.Runtime.SubscribeDataAsync(PositionTopic.Default, _cts.Token);
+        await _client.Runtime.SubscribeDataAsync(Topics.Position, _cts.Token);
 
         // Wait for the first message to arrive
-        await _client.Runtime.WaitForFirstDataAsync(PositionTopic.Default, _cts.Token);
+        await _client.Runtime.WaitForFirstDataAsync(Topics.Position, _cts.Token);
 
         // Obtain a handle once and reuse it every frame
-        _positionHandle = _client.Runtime.GetDataHandle(PositionTopic.Default);
+        _positionHandle = _client.Runtime.GetDataHandle(Topics.Position);
     }
 
     private void Update()
     {
-        if (!_positionHandle.HasValue) return;
+        if (_positionHandle == null) return;
         var pos = _positionHandle.Value;
         transform.position = new Vector3(pos.X, pos.Y, pos.Z);
     }
@@ -250,7 +252,7 @@ public class CommandReceiver : MonoBehaviour
     private async void Start()
     {
         _registration = await _client.Runtime.RegisterHandlerLeaseAsync(
-            RobotCommandTopic.Default,
+            Topics.Command,
             async (command, ct) =>
             {
                 await robot.ExecuteAsync(command, ct);
@@ -275,7 +277,7 @@ var position = new Position
     Z = transform.position.z
 };
 
-await _client.Runtime.PublishDataAsync(PositionTopic.Default, position, cancellationToken: _cts.Token);
+await _client.Runtime.PublishDataAsync(Topics.Position, position, cancellationToken: _cts.Token);
 ```
 
 ---
@@ -306,10 +308,10 @@ await runtime.StartAsync(cts.Token);
 await runtime.WaitUntilConnectedAsync(cts.Token);
 
 // Subscribe
-await runtime.SubscribeDataAsync(PositionTopic.Default, cts.Token);
-await runtime.WaitForFirstDataAsync(PositionTopic.Default, cts.Token);
+await runtime.SubscribeDataAsync(Topics.Position, cts.Token);
+await runtime.WaitForFirstDataAsync(Topics.Position, cts.Token);
 
-var handle = runtime.GetDataHandle(PositionTopic.Default);
+var handle = runtime.GetDataHandle(Topics.Position);
 
 // 100 Hz loop
 while (!cts.IsCancellationRequested)
@@ -328,16 +330,17 @@ while (!cts.IsCancellationRequested)
 ### Define Topic and Type in the same file
 
 ```csharp
-// RobotCommand.cs
+// Types.cs
 public sealed class RobotCommand
 {
     public string Type { get; set; }
     public string Payload { get; set; }
 }
 
-public static class RobotCommandTopic
+// Topics.cs
+public static class Topics
 {
-    public static readonly IPullSubTopic<RobotCommand> Default
+    public static readonly IPullSubTopic<RobotCommand> RobotCommand
         = PullSubTopic.Create<RobotCommand>("robot/command");
 }
 ```
@@ -347,12 +350,12 @@ public static class RobotCommandTopic
 Referencing the same definition files on both sides prevents codec mismatches.
 
 ```
-SharedTopics/
-  ├── Position.cs       ← Position type + PositionTopic
-  └── RobotCommand.cs   ← RobotCommand type + RobotCommandTopic
+SharedClass/
+  ├── Types.cs       ← Position type + RobotCommand type (Define Types)
+  └── Topics.cs   ← Position topic + RobotCommand topic (Define Topics)
 
-Publisher (.NET / Raspberry Pi)  ← references SharedTopics
-Subscriber (Unity)               ← references SharedTopics
+Publisher (.NET / Raspberry Pi)  ← references SharedClass
+Subscriber (Unity)               ← references SharedClass
 ```
 
 ---
@@ -432,10 +435,10 @@ The default subscribe QoS is `AtLeastOnce` (QoS 1). The actual delivered QoS is 
 
 ```csharp
 // Default — AtLeastOnce
-await runtime.SubscribeDataAsync(PositionTopic.Default, cancellationToken: ct);
+await runtime.SubscribeDataAsync(Topics.Position, cancellationToken: ct);
 
 // Explicit QoS
-await runtime.SubscribeDataAsync(PositionTopic.Default,
+await runtime.SubscribeDataAsync(Topics.Position,
     PullSubQualityOfServiceLevel.ExactlyOnce, ct);
 ```
 

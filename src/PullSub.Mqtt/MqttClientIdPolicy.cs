@@ -1,4 +1,4 @@
-namespace PullSub.Core
+namespace PullSub.Mqtt
 {
     public enum MqttClientIdPolicy
     {

@@ -1,6 +1,6 @@
 using System;
 
-namespace PullSub.Core
+namespace PullSub.Mqtt
 {
     public sealed class MqttClientProfile : IEquatable<MqttClientProfile>
     {

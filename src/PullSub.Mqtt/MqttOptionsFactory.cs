@@ -5,7 +5,7 @@ using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Extensions.ManagedClient;
 
-namespace PullSub.Core
+namespace PullSub.Mqtt
 {
     internal static class MqttOptionsFactory
     {

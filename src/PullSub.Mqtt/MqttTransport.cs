@@ -3,8 +3,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using MQTTnet;
 using MQTTnet.Extensions.ManagedClient;
+using PullSub.Core;
 
-namespace PullSub.Core
+namespace PullSub.Mqtt
 {
     internal sealed class MqttTransport : ITransport, IAsyncDisposable
     {
