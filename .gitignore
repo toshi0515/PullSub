@@ -13,12 +13,6 @@ Thumbs.db
 *.csproj
 *.sln
 *.slnx
-unity/Runtime/Core/*.csproj
-unity/Runtime/Mqtt/*.csproj
-unity/Runtime/Core/*.csproj.meta
-unity/Runtime/Mqtt/*.csproj.meta
-unity/Runtime/Core/*.asmdef.meta
-unity/Runtime/Mqtt/*.asmdef.meta
 # ただし、手動で作成した src/ と tests/ 以下のプロジェクトファイルは Git 管理に含める
 !src/**/*.csproj
 !tests/**/*.csproj
@@ -27,7 +21,8 @@ omnisharp.json
 
 # .NET build output (redirected here from src/ to avoid Unity DLL conflicts)
 artifacts/
-src/**/*.meta
+PullSub.Core/**/*.meta
+PullSub.Mqtt/**/*.meta
 
 # Unity & .NET standard build outputs
 [Ll]ibrary/
@@ -41,7 +36,5 @@ src/**/*.meta
 *.pdb.meta
 
 # Unity DLL dependencies (install manually or via NuGet for Unity)
-unity/Runtime/Core/Plugins/*.dll
-unity/Runtime/Core/Plugins/*.dll.meta
-unity/Runtime/Mqtt/Plugins/*.dll
-unity/Runtime/Mqtt/Plugins/*.dll.meta
+com.toshi0515.pullsub/Runtime/Plugins/*.dll
+com.toshi0515.pullsub/Runtime/Plugins/*.dll.meta

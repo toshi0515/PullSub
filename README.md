@@ -154,7 +154,7 @@ Installing DLLs via [NuGet for Unity](https://github.com/GlitchEnzo/NuGetForUnit
 
 Install via UPM with a git URL:
 ```
-https://github.com/toshi0515/PullSub.git?path=unity
+https://github.com/toshi0515/PullSub.git?path=com.toshi0515.pullsub
 ```
 
 ### .NET (NuGet)

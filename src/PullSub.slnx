@@ -1,5 +1,0 @@
-<Solution>
-  <Project Path="PullSub.Core/PullSub.Core.csproj" />
-  <Project Path="PullSub.Mqtt/PullSub.Mqtt.csproj" />
-  <Project Path="../tests/PullSub.Core.Tests/PullSub.Core.Tests.csproj" />
-</Solution>
