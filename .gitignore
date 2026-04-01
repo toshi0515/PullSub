@@ -36,5 +36,5 @@ PullSub.Mqtt/**/*.meta
 *.pdb.meta
 
 # Unity DLL dependencies (install manually or via NuGet for Unity)
-com.toshi0515.pullsub/Runtime/Plugins/*.dll
-com.toshi0515.pullsub/Runtime/Plugins/*.dll.meta
+src/com.toshi0515.pullsub/Runtime/Plugins/*.dll
+src/com.toshi0515.pullsub/Runtime/Plugins/*.dll.meta
