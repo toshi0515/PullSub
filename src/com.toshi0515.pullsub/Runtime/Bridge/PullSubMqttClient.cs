@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Serialization;
 using PullSub.Core;
+using PullSub.Mqtt;
 
 namespace PullSub.Bridge
 {

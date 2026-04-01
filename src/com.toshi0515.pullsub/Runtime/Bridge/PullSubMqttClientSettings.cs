@@ -3,6 +3,7 @@ using System.Security.Authentication;
 using UnityEngine;
 using UnityEngine.Serialization;
 using PullSub.Core;
+using PullSub.Mqtt;
 
 namespace PullSub.Bridge
 {
