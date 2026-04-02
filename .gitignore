@@ -24,6 +24,9 @@ artifacts/
 PullSub.Core/**/*.meta
 PullSub.Mqtt/**/*.meta
 
+dotnet/tests/**/TestResults/
+*.dmp
+
 # Unity & .NET standard build outputs
 [Ll]ibrary/
 [Tt]emp/
