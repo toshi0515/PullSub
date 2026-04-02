@@ -14,7 +14,6 @@ Pull-style typed Pub/Sub runtime for Unity and .NET. Supports MQTTnet v4.3.x and
 ---
 
 ## What PullSub provides
-
 ```csharp
 // Raw MQTTnet — thread safety, decoding, and lifetime management are your responsibility
 client.ApplicationMessageReceivedAsync += e =>
@@ -379,6 +378,18 @@ PullSubTopic.Create<Position>("robot/position",
 
 Always share the same codec between Publisher and Subscriber. Defining the codec inside `IPullSubTopic<T>` is the recommended way to enforce this.
 
+### Notes on Missing Members
+
+- By default, PullSub uses System.Text.Json behavior that serializes/deserializes public properties.
+- If a payload is missing a member, that member is deserialized as its default value.
+    - `int` -> `0`, `float` -> `0`, `bool` -> `false`, reference type -> `null`
+- PullSub Data API does not merge missing members with previous cached values.
+    A successfully decoded payload replaces the cached value for the topic.
+
+To avoid accidental defaults caused by schema drift, share the same DTO and topic definitions between Publisher and Subscriber.
+
+
+
 ---
 
 ## Connection Options
@@ -536,6 +547,20 @@ DateTime TimestampLocal { get; }    // TimestampUtc converted to local time
 T GetValueOrDefault(T fallback)     // Returns fallback instead of default(T) when no data
 string Topic { get; }               // The subscribed topic name
 ```
+
+### Data Arrival and Default Semantics
+
+Before the first message arrives for a topic:
+
+- `HasValue` is `false`
+- `Value` returns `default(T)`
+- `TimestampUtc` returns `default(DateTime)`
+
+Practical implications:
+
+- If `T` is a class, `Value` may be `null` before first arrival.
+- If `T` is a struct, each member is the type default until first arrival.
+- To avoid ambiguous reads, call `WaitForFirstDataAsync` before using `Value` in the main loop.
 
 ### PullSubQueueMessage
 

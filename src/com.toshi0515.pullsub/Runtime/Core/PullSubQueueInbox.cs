@@ -83,6 +83,7 @@ namespace PullSub.Core
                 throw new ArgumentNullException(nameof(payload));
 
             SemaphoreSlim signal;
+            var shouldSignal = false;
             lock (_gate)
             {
                 if (!_optionsByTopic.TryGetValue(topic, out var options))
@@ -102,15 +103,19 @@ namespace PullSub.Core
 
                 queue.Enqueue(new PullSubQueueMessage(topic, payload, DateTime.UtcNow));
                 signal = GetOrCreateSignalNoLock(topic);
+                shouldSignal = signal.CurrentCount == 0;
             }
+
+            if (!shouldSignal)
+                return;
 
             try
             {
                 signal.Release();
             }
-            catch (SemaphoreFullException)
+            catch (ObjectDisposedException)
             {
-                // Signal is already pending.
+                // Topic can be removed concurrently during shutdown/unsubscribe.
             }
         }
 

@@ -15,7 +15,7 @@ namespace PullSub.Mqtt
 
         public Func<Task> OnConnected { get; set; }
         public Func<string, Task> OnDisconnected { get; set; }
-        public Func<string, byte[], Task> OnMessageReceived { get; set; }
+        public Func<string, ReadOnlyMemory<byte>, Task> OnMessageReceived { get; set; }
 
         public bool IsStarted => _client.IsStarted;
         public bool IsConnected => _client.IsConnected;
@@ -43,7 +43,7 @@ namespace PullSub.Mqtt
                 if (msg == null)
                     return Task.CompletedTask;
 
-                var payload = ClonePayload(msg.PayloadSegment);
+                var payload = GetPayloadMemory(msg.PayloadSegment);
                 return OnMessageReceived?.Invoke(msg.Topic, payload) ?? Task.CompletedTask;
             };
         }
@@ -110,14 +110,12 @@ namespace PullSub.Mqtt
                 (_client as IDisposable)?.Dispose();
         }
 
-        private static byte[] ClonePayload(ArraySegment<byte> payload)
+        private static ReadOnlyMemory<byte> GetPayloadMemory(ArraySegment<byte> payload)
         {
             if (payload.Array == null || payload.Count == 0)
-                return Array.Empty<byte>();
+                return ReadOnlyMemory<byte>.Empty;
 
-            var cloned = new byte[payload.Count];
-            Buffer.BlockCopy(payload.Array, payload.Offset, cloned, 0, payload.Count);
-            return cloned;
+            return new ReadOnlyMemory<byte>(payload.Array, payload.Offset, payload.Count);
         }
     }
 }

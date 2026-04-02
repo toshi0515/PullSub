@@ -9,7 +9,7 @@ namespace PullSub.Core
     /// JSON envelope 形式の標準型付き Codec。
     /// ペイロード形式は <c>{ "timestamp": "...", "data": { ...T のプロパティ... } }</c> です。
     /// </summary>
-    public sealed class PullSubJsonPayloadCodec<T> : PullSubTextPayloadCodec<T>
+    public sealed class PullSubJsonPayloadCodec<T> : PullSubTextPayloadCodec<T>, IPayloadInPlaceCodec<T>
     {
         private static readonly JsonSerializerOptions DefaultOptions = new JsonSerializerOptions
         {
@@ -36,21 +36,18 @@ namespace PullSub.Core
             return _options.GetHashCode();
         }
 
-        public override byte[] Encode(DateTime timestampUtc, T value)
+        public override void Encode(DateTime timestampUtc, T value, IBufferWriter<byte> bufferWriter)
         {
+            if (bufferWriter == null)
+                throw new ArgumentNullException(nameof(bufferWriter));
+
             var normalized = NormalizeTimestampOrNow(timestampUtc);
-            var buffer = new ArrayBufferWriter<byte>(256);
-
-            using (var writer = new Utf8JsonWriter(buffer))
-            {
-                writer.WriteStartObject();
-                writer.WriteString("timestamp", normalized);
-                writer.WritePropertyName("data");
-                JsonSerializer.Serialize(writer, value, _options);
-                writer.WriteEndObject();
-            }
-
-            return buffer.WrittenSpan.ToArray();
+            using var writer = new Utf8JsonWriter(bufferWriter);
+            writer.WriteStartObject();
+            writer.WriteString("timestamp", normalized);
+            writer.WritePropertyName("data");
+            JsonSerializer.Serialize(writer, value, _options);
+            writer.WriteEndObject();
         }
 
         public override bool TryDecode(ReadOnlySpan<byte> payload, out T value, out DateTime timestampUtc, out string error)
@@ -130,9 +127,40 @@ namespace PullSub.Core
             }
         }
 
+        public bool TryDecodeInPlace(ReadOnlySpan<byte> payload, T destination, out DateTime timestampUtc, out string error)
+        {
+            if (!typeof(T).IsClass)
+            {
+                timestampUtc = default;
+                error = "in-place decode is only supported for class payload types.";
+                return false;
+            }
+
+            if (destination is null)
+            {
+                timestampUtc = default;
+                error = "destination instance is null.";
+                return false;
+            }
+
+            if (!TryDecode(payload, out var decoded, out timestampUtc, out error))
+                return false;
+
+            if (decoded is null)
+            {
+                error = "decoded payload is null.";
+                return false;
+            }
+
+            ObjectMemberCopier<T>.Copy(decoded, destination);
+            return true;
+        }
+
         protected override string FormatPayload(DateTime timestampUtc, T value)
         {
-            return Encoding.UTF8.GetString(Encode(timestampUtc, value));
+            var buffer = new ArrayBufferWriter<byte>(256);
+            Encode(timestampUtc, value, buffer);
+            return Encoding.UTF8.GetString(buffer.WrittenSpan);
         }
 
         protected override bool TryParsePayload(string text, out T value, out DateTime timestampUtc, out string error)

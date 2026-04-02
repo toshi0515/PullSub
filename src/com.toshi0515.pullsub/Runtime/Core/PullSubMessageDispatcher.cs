@@ -24,9 +24,9 @@ namespace PullSub.Core
             _logException = logException ?? (_ => { });
         }
 
-        public void Dispatch(string topic, byte[] payload)
+        public void Dispatch(string topic, ReadOnlyMemory<byte> payload)
         {
-            if (string.IsNullOrWhiteSpace(topic) || payload == null)
+            if (string.IsNullOrWhiteSpace(topic))
                 return;
 
             try
@@ -39,14 +39,14 @@ namespace PullSub.Core
 
                 if (hasRaw)
                 {
-                    _rawInbox.Enqueue(topic, payload);
+                    _rawInbox.Enqueue(topic, payload.ToArray());
 
                     if (hasData)
-                        ProcessDataPayload(topic, payload);
+                        ProcessDataPayload(topic, payload.Span);
                 }
                 else
                 {
-                    ProcessDataPayload(topic, payload.AsSpan());
+                    ProcessDataPayload(topic, payload.Span);
                 }
             }
             catch (Exception ex)

@@ -4,24 +4,28 @@ namespace PullSub.Core
     {
         private readonly PullSubRuntime _runtime;
         private readonly string _topic;
+        private readonly TypedTopicCache<T> _cache;
 
-        internal PullSubDataHandle(PullSubRuntime runtime, string topic)
+        internal PullSubDataHandle(PullSubRuntime runtime, string topic, TypedTopicCache<T> cache)
         {
-            _runtime = runtime;
-            _topic = topic;
+            _runtime = runtime ?? throw new System.ArgumentNullException(nameof(runtime));
+            _topic = topic ?? throw new System.ArgumentNullException(nameof(topic));
+            _cache = cache ?? throw new System.ArgumentNullException(nameof(cache));
         }
 
         /// <summary>
         /// 最新値を返します。データ未到着の場合は default(T) を返します。
+        /// Data API は in-place 更新前提のため、参照型 T の場合は
+        /// 取得した参照をフレーム間で保持しないでください。
         /// </summary>
-        public T Value => _runtime.TryGetData<T>(_topic, out var v) ? v : default;
+        public T Value => _cache.TryGet(out var v, out _) ? v : default;
 
         /// <summary>
         /// 最新データの発生時刻（世界標準時）を返します。
         /// JSON ペイロードに timestamp が含まれていればそれを、なければ受信時刻を返します。
         /// データ未到着の場合は default(DateTime) を返します。
         /// </summary>
-        public System.DateTime TimestampUtc => _runtime.TryGetData<T>(_topic, out _, out var ts) ? ts : default;
+        public System.DateTime TimestampUtc => _cache.TryGet(out _, out var ts) ? ts : default;
 
         /// <summary>
         /// 端末のローカル時間に変換された発生時刻を返します。
@@ -31,13 +35,13 @@ namespace PullSub.Core
         /// <summary>
         /// データが一度でも到着しているかどうか。
         /// </summary>
-        public bool HasValue => _runtime.TryGetData<T>(_topic, out _);
+        public bool HasValue => _cache.TryGet(out _, out _);
 
         /// <summary>
         /// データ未到着のときに返す値を明示したい場合。
         /// </summary>
         public T GetValueOrDefault(T fallback) =>
-            _runtime.TryGetData<T>(_topic, out var v) ? v : fallback;
+            _cache.TryGet(out var v, out _) ? v : fallback;
 
         /// <summary>
         /// 購読中のトピック名。
@@ -49,6 +53,6 @@ namespace PullSub.Core
         /// UnsubscribeDataAsync または DisposeAsync の後は false になります。
         /// </summary>
         public bool IsValid => !_runtime.IsDisposeRequested
-            && _runtime.TryGetData<T>(_topic, out _);
+            && _cache.TryGet(out _, out _);
     }
 }

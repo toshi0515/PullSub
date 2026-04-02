@@ -84,7 +84,12 @@ namespace PullSub.Core
         {
             ThrowIfDisposed();
             PullSubSubscriptionRegistry.ValidateExactMatchTopic(topic);
-            return new PullSubDataHandle<T>(this, topic);
+
+            if (!_typedDataRegistry.TryGetCache<T>(topic, out var cache))
+                throw new System.InvalidOperationException(
+                    $"Topic '{topic}' is not registered for type {typeof(T).Name}. Call SubscribeDataAsync<T> first.");
+
+            return new PullSubDataHandle<T>(this, topic, cache);
         }
 
         public T GetData<T>(string topic, T defaultValue = default)

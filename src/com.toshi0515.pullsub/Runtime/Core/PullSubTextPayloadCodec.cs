@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Text;
 
 namespace PullSub.Core
@@ -20,10 +21,19 @@ namespace PullSub.Core
         /// <summary>timestamp と value を送信テキストに変換します。</summary>
         protected abstract string FormatPayload(DateTime timestampUtc, T value);
 
-        public virtual byte[] Encode(DateTime timestampUtc, T value)
+        public virtual void Encode(DateTime timestampUtc, T value, IBufferWriter<byte> bufferWriter)
         {
+            if (bufferWriter == null)
+                throw new ArgumentNullException(nameof(bufferWriter));
+
             var text = FormatPayload(NormalizeTimestampOrNow(timestampUtc), value);
-            return Encoding.UTF8.GetBytes(text);
+            if (text == null)
+                throw new InvalidOperationException("Codec returned null text payload.");
+
+            var byteCount = Encoding.UTF8.GetByteCount(text);
+            var span = bufferWriter.GetSpan(byteCount);
+            var bytesWritten = Encoding.UTF8.GetBytes(text.AsSpan(), span);
+            bufferWriter.Advance(bytesWritten);
         }
 
         public virtual bool TryDecode(ReadOnlySpan<byte> payload, out T value, out DateTime timestampUtc, out string error)

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -41,7 +42,13 @@ namespace PullSub.Core
             if (codec == null)
                 throw new ArgumentNullException(nameof(codec));
 
-            var bytes = codec.Encode(DateTime.UtcNow, value);
+            var timestampUtc = DateTime.UtcNow;
+            var buffer = new ArrayBufferWriter<byte>(256);
+            codec.Encode(timestampUtc, value, buffer);
+            var bytes = buffer.WrittenCount == 0
+                ? Array.Empty<byte>()
+                : buffer.WrittenMemory.ToArray();
+
             if (bytes == null)
                 throw new InvalidOperationException("Payload codec returned null bytes.");
 

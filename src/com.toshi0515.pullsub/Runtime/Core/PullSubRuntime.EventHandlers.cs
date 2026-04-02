@@ -46,7 +46,7 @@ namespace PullSub.Core
             return Task.CompletedTask;
         }
 
-        private Task HandleMessageReceivedAsync(string topic, byte[] payload)
+        private Task HandleMessageReceivedAsync(string topic, ReadOnlyMemory<byte> payload)
         {
             if (IsDisposeRequested)
                 return Task.CompletedTask;

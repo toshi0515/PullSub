@@ -10,6 +10,7 @@ namespace PullSub.Core
     internal interface ITypedTopicCache
     {
         void Cancel();
+        void Invalidate();
     }
 
     /// <summary>
@@ -21,6 +22,7 @@ namespace PullSub.Core
         private T _latest;
         private DateTime _latestTimestampUtc;
         private bool _hasValue;
+        private bool _isActive = true;
         private TaskCompletionSource<T> _firstValueSignal;
 
         public void Update(T value, DateTime timestampUtc)
@@ -28,6 +30,9 @@ namespace PullSub.Core
             TaskCompletionSource<T> signalToComplete = null;
             lock (_gate)
             {
+                if (!_isActive)
+                    return;
+
                 _latest = value;
                 _latestTimestampUtc = timestampUtc;
                 if (!_hasValue)
@@ -44,7 +49,7 @@ namespace PullSub.Core
         {
             lock (_gate)
             {
-                if (_hasValue)
+                if (_isActive && _hasValue)
                 {
                     value = _latest;
                     timestampUtc = _latestTimestampUtc;
@@ -63,6 +68,9 @@ namespace PullSub.Core
                 Task<T> waitTask;
                 lock (_gate)
                 {
+                    if (!_isActive)
+                        throw new InvalidOperationException("Topic cache is not active.");
+
                     if (_hasValue)
                         return _latest;
 
@@ -87,6 +95,23 @@ namespace PullSub.Core
             signal?.TrySetCanceled();
         }
 
+        public void Invalidate()
+        {
+            TaskCompletionSource<T> signal;
+            lock (_gate)
+            {
+                _isActive = false;
+                _hasValue = false;
+                _latest = default;
+                _latestTimestampUtc = default;
+                signal = _firstValueSignal;
+                _firstValueSignal = null;
+            }
+
+            signal?.TrySetCanceled();
+        }
+
         void ITypedTopicCache.Cancel() => Cancel();
+        void ITypedTopicCache.Invalidate() => Invalidate();
     }
 }

@@ -49,6 +49,16 @@ namespace PullSub.Core
 
             public override bool TryDecodeAndUpdate(ReadOnlySpan<byte> payload)
             {
+                if (typeof(T).IsClass
+                    && _codec is IPayloadInPlaceCodec<T> inPlaceCodec
+                    && _cache.TryGet(out var existingValue, out _)
+                    && !(existingValue is null)
+                    && inPlaceCodec.TryDecodeInPlace(payload, existingValue, out var inPlaceTimestampUtc, out _))
+                {
+                    _cache.Update(existingValue, inPlaceTimestampUtc);
+                    return true;
+                }
+
                 if (!_codec.TryDecode(payload, out var value, out var timestampUtc, out _))
                     return false;
 
@@ -75,6 +85,14 @@ namespace PullSub.Core
         /// <returns>true のとき、このトピックの最初の登録（ネットワーク購読を開始すべき）</returns>
         public bool Register<T>(string topic, IPayloadCodec<T> codec, out TypedTopicCache<T> cache)
         {
+            if (typeof(T).IsClass && !(codec is IPayloadInPlaceCodec<T>))
+            {
+                throw new InvalidOperationException(
+                    $"Topic '{topic}' uses class payload type '{typeof(T).Name}', " +
+                    "but codec does not implement IPayloadInPlaceCodec<T>. " +
+                    "Data API requires in-place decode for class payloads.");
+            }
+
             lock (_gate)
             {
                 if (_entries.TryGetValue(topic, out var existing))
@@ -108,6 +126,7 @@ namespace PullSub.Core
         /// <returns>true のとき、最後の参照が解放された（ネットワーク購読解除すべき）</returns>
         public bool Unregister(string topic)
         {
+            ITypedTopicCache removedCache = null;
             lock (_gate)
             {
                 if (!_entries.TryGetValue(topic, out var entry))
@@ -116,11 +135,17 @@ namespace PullSub.Core
                 entry.RefCount--;
                 if (entry.RefCount <= 0)
                 {
+                    removedCache = entry.Cache;
                     _entries.Remove(topic);
-                    return true;
                 }
-                return false;
+                else
+                {
+                    return false;
+                }
             }
+
+            removedCache.Invalidate();
+            return true;
         }
 
         public bool IsRegistered(string topic)
@@ -177,7 +202,10 @@ namespace PullSub.Core
                 _entries.Clear();
             }
             foreach (var cache in caches)
+            {
+                cache.Invalidate();
                 cache.Cancel();
+            }
         }
     }
 }

@@ -111,6 +111,12 @@ PullSub abstracts transport protocols behind `ITransport`. You can use protocols
 
 Use this for data where only the latest value matters, such as IoT sensor readings, digital twin state, or robot pose.
 
+Data API is optimized for in-place latest-state reads:
+
+- Read `Value` and consume it in the same frame/tick.
+- Do not keep `Value` references for history or delayed processing.
+- Use Queue API when you need ordered history or event replay.
+
 ```csharp
 // Poll in Update() — just like transform.position
 private void Update()
@@ -379,6 +385,19 @@ PullSubTopic.Create<Position>("robot/position",
 
 Always share the same codec between Publisher and Subscriber. Defining the codec inside `IPullSubTopic<T>` is the recommended way to enforce this.
 
+For class payloads used in Data API, codecs must support in-place decode (`IPayloadInPlaceCodec<T>`).
+Built-in JSON codecs already support this contract.
+
+### Notes on Missing Members
+
+- By default, PullSub uses System.Text.Json behavior that serializes/deserializes public properties.
+- If a payload is missing a member, that member is deserialized as its default value.
+    - `int` -> `0`, `float` -> `0`, `bool` -> `false`, reference type -> `null`
+- PullSub Data API does not merge missing members with previous cached values.
+    A successfully decoded payload replaces the cached value for the topic.
+
+To avoid accidental defaults caused by schema drift, share the same DTO and topic definitions between Publisher and Subscriber.
+
 ---
 
 ## Connection Options
@@ -536,6 +555,23 @@ DateTime TimestampLocal { get; }    // TimestampUtc converted to local time
 T GetValueOrDefault(T fallback)     // Returns fallback instead of default(T) when no data
 string Topic { get; }               // The subscribed topic name
 ```
+
+Data handle is intended for latest-state pull in game loops.
+Avoid keeping `Value` references across frames; use Queue API or explicit snapshots for history.
+
+### Data Arrival and Default Semantics
+
+Before the first message arrives for a topic:
+
+- `HasValue` is `false`
+- `Value` returns `default(T)`
+- `TimestampUtc` returns `default(DateTime)`
+
+Practical implications:
+
+- If `T` is a class, `Value` may be `null` before first arrival.
+- If `T` is a struct, each member is the type default until first arrival.
+- To avoid ambiguous reads, call `WaitForFirstDataAsync` before using `Value` in the main loop.
 
 ### PullSubQueueMessage
 

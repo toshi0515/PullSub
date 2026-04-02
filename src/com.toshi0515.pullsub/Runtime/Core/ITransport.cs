@@ -12,7 +12,8 @@ namespace PullSub.Core
         // イベントは MQTTnet 型に依存しないデリゲートで定義
         Func<Task> OnConnected { get; set; }
         Func<string, Task> OnDisconnected { get; set; } // reason string
-        Func<string, byte[], Task> OnMessageReceived { get; set; } // topic, payload
+        // Borrowed payload memory is valid only during callback execution.
+        Func<string, ReadOnlyMemory<byte>, Task> OnMessageReceived { get; set; } // topic, payload
 
         Task StartAsync(CancellationToken cancellationToken);
         Task StopAsync(bool cleanDisconnect, CancellationToken cancellationToken);
