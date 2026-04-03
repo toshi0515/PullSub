@@ -1,12 +1,13 @@
 {
-    "name": "PullSub.Bridge",
-    "rootNamespace": "PullSub.Bridge",
+    "name": "PullSub.Editor",
+    "rootNamespace": "PullSub.Editor",
     "references": [
-        "PullSub.Core",
-        "PullSub.Mqtt",
-        "UniTask"
+        "PullSub.Bridge",
+        "PullSub.Core"
     ],
-    "includePlatforms": [],
+    "includePlatforms": [
+        "Editor"
+    ],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": false,

@@ -54,14 +54,13 @@ public class RobotController : MonoBehaviour
 
         await _client.Runtime.SubscribeDataAsync(Topics.Position, _cts.Token);
 
-        await _client.Runtime.WaitForFirstDataAsync(Topics.Position, _cts.Token);
-
         _positionHandle = _client.Runtime.GetDataHandle(Topics.Position);
     }
 
     private void Update()
     {
         if (_positionHandle == null) return;
+        if (!_positionHandle.HasValue) return;
         // Access the latest value just like transform.position
         var pos = _positionHandle.Value;
         transform.position = new Vector3(pos.X, pos.Y, pos.Z);
@@ -199,7 +198,85 @@ public static class Topics
 }
 ```
 
-### 3. Subscribe and Access Data
+### 3. Recommended: Use PullSubDataCache (non-blocking)
+
+`PullSubDataCache` can subscribe multiple topics in parallel and publish latest values without blocking on first-arrival waits.
+
+Define topics by convention (`*Topics` classes) or opt-in with attributes:
+
+```csharp
+using PullSub.Bridge;
+using PullSub.Core;
+
+public static class RobotTopics
+{
+    // Convention-based discovery: class name ends with "Topics"
+    public static readonly IPullSubTopic<Position> Position
+        = PullSubTopic.Create<Position>("robot/position");
+
+    // Optional explicit key name for inspector
+    [PullSubTopicKeyAlias("RobotStatus")]
+    public static readonly IPullSubTopic<RobotStatus> Status
+        = PullSubTopic.Create<RobotStatus>("robot/status");
+}
+```
+
+Topic keys are generated automatically after script recompilation.
+You can also run it manually from `Tools > PullSub > Generate Topic Catalog`.
+
+Add `PullSubDataCache` to a GameObject, assign `PullSubMqttClient`, and choose topic keys + per-topic QoS in the Inspector.
+`PullSubTopicKey` is only for Inspector setup; runtime access uses `IPullSubTopic<T>` (same style as Core APIs).
+
+Consume values with `HasValue`/`TryGet`:
+
+```csharp
+using PullSub.Bridge;
+using PullSub.Core;
+using UnityEngine;
+
+public sealed class RobotControllerByTopic : MonoBehaviour
+{
+    [SerializeField] private PullSubDataCache _cache;
+
+    private void Update()
+    {
+        if (!_cache.TryGet(RobotTopics.Position, out Position pos))
+            return;
+
+        transform.position = new Vector3(pos.X, pos.Y, pos.Z);
+    }
+}
+```
+
+And you can use a DataHandle-like API from `PullSubDataCache`:
+
+```csharp
+using PullSub.Bridge;
+using PullSub.Core;
+using UnityEngine;
+
+public sealed class RobotControllerByHandle : MonoBehaviour
+{
+    [SerializeField] private PullSubDataCache _cache;
+
+    private PullSubDataHandle<Position> _positionHandle;
+
+    private void Awake()
+    {
+        _positionHandle = _cache.GetDataHandle(RobotTopics.Position);
+    }
+
+    private void Update()
+    {
+        if (!_positionHandle.HasValue) return;
+
+        var pos = _positionHandle.Value;
+        transform.position = new Vector3(pos.X, pos.Y, pos.Z);
+    }
+}
+```
+
+### 4. Direct Runtime Access (advanced)
 
 ```csharp
 using System.Threading;
@@ -224,9 +301,6 @@ public class RobotController : MonoBehaviour
         // Subscribe
         await _client.Runtime.SubscribeDataAsync(Topics.Position, _cts.Token);
 
-        // Wait for the first message to arrive
-        await _client.Runtime.WaitForFirstDataAsync(Topics.Position, _cts.Token);
-
         // Obtain a handle once and reuse it every frame
         _positionHandle = _client.Runtime.GetDataHandle(Topics.Position);
     }
@@ -234,6 +308,7 @@ public class RobotController : MonoBehaviour
     private void Update()
     {
         if (_positionHandle == null) return;
+        if (!_positionHandle.HasValue) return;
         var pos = _positionHandle.Value;
         transform.position = new Vector3(pos.X, pos.Y, pos.Z);
     }
@@ -246,7 +321,9 @@ public class RobotController : MonoBehaviour
 }
 ```
 
-### 4. Handle Commands Using the Queue API
+Use `WaitForFirstDataAsync` only when you explicitly need strict first-arrival gating.
+
+### 5. Handle Commands Using the Queue API
 
 ```csharp
 public class CommandReceiver : MonoBehaviour
@@ -273,7 +350,7 @@ public class CommandReceiver : MonoBehaviour
 }
 ```
 
-### 5. Publish Data
+### 6. Publish Data
 
 ```csharp
 var position = new Position
@@ -571,7 +648,9 @@ Practical implications:
 
 - If `T` is a class, `Value` may be `null` before first arrival.
 - If `T` is a struct, each member is the type default until first arrival.
-- To avoid ambiguous reads, call `WaitForFirstDataAsync` before using `Value` in the main loop.
+- Preferred non-blocking flow: use `HasValue` (or `TryGet` in `PullSubDataCache`) before reading `Value`.
+- In `PullSubDataCache`, `PullSubTopicKey` is for Inspector setup only; runtime access uses `IPullSubTopic<T>` and `GetDataHandle`.
+- Optional strict flow: call `WaitForFirstDataAsync` when your app requires first-arrival gating.
 
 ### PullSubQueueMessage
 

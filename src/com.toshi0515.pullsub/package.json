@@ -4,7 +4,9 @@
   "displayName": "PullSub",
   "description": "Pull-style typed Pub/Sub runtime for Unity and .NET. Supports MQTTnet v4.3.x and MQTTnet.Extensions.ManagedClient v4.3.x.",
   "unity": "2022.3",
-  "dependencies": {},
+  "dependencies": {
+    "com.cysharp.unitask": "2.5.10"
+  },
   "author": {
     "name": "toshi0515",
     "url": "https://github.com/Toshi-0515"
