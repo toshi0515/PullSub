@@ -15,6 +15,9 @@ namespace PullSub.Core.Tests.TestScenarios.Fixtures
         private readonly Dictionary<string, PullSubQualityOfServiceLevel> _subscriptions
             = new Dictionary<string, PullSubQualityOfServiceLevel>(StringComparer.Ordinal);
 
+        private int _subscribeCallCount;
+        private int _unsubscribeCallCount;
+
         public Func<Task>? OnConnected { get; set; }
         public Func<string, Task>? OnDisconnected { get; set; }
         public Func<string, ReadOnlyMemory<byte>, Task>? OnMessageReceived { get; set; }
@@ -24,6 +27,9 @@ namespace PullSub.Core.Tests.TestScenarios.Fixtures
 
         public IReadOnlyCollection<(string Topic, byte[] Payload, PullSubQualityOfServiceLevel Qos, bool Retain)> Published
             => _published.ToArray();
+
+        public int SubscribeCallCount => Volatile.Read(ref _subscribeCallCount);
+        public int UnsubscribeCallCount => Volatile.Read(ref _unsubscribeCallCount);
 
         public Task StartAsync(CancellationToken cancellationToken)
         {
@@ -50,6 +56,7 @@ namespace PullSub.Core.Tests.TestScenarios.Fixtures
         public Task SubscribeAsync(string topic, PullSubQualityOfServiceLevel qos, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref _subscribeCallCount);
             _subscriptions[topic] = qos;
             return Task.CompletedTask;
         }
@@ -57,6 +64,7 @@ namespace PullSub.Core.Tests.TestScenarios.Fixtures
         public Task UnsubscribeAsync(string topic, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref _unsubscribeCallCount);
             _subscriptions.Remove(topic);
             return Task.CompletedTask;
         }

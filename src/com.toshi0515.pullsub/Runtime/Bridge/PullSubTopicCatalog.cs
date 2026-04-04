@@ -41,6 +41,11 @@ namespace PullSub.Bridge
     {
         PullSubTopicKey Key { get; }
 
+        Task<IPullSubSubscriptionLease> SubscribeAsync(
+            PullSubContext context,
+            PullSubQualityOfServiceLevel qos,
+            CancellationToken cancellationToken);
+
         Task SubscribeAsync(PullSubRuntime runtime, PullSubQualityOfServiceLevel qos, CancellationToken cancellationToken);
         Task UnsubscribeAsync(PullSubRuntime runtime, CancellationToken cancellationToken);
     }
@@ -56,6 +61,17 @@ namespace PullSub.Bridge
         }
 
         public PullSubTopicKey Key { get; }
+
+        public async Task<IPullSubSubscriptionLease> SubscribeAsync(
+            PullSubContext context,
+            PullSubQualityOfServiceLevel qos,
+            CancellationToken cancellationToken)
+        {
+            if (context == null)
+                throw new ArgumentNullException(nameof(context));
+
+            return await context.SubscribeAsync(_topic, qos, cancellationToken).ConfigureAwait(false);
+        }
 
         public Task SubscribeAsync(PullSubRuntime runtime, PullSubQualityOfServiceLevel qos, CancellationToken cancellationToken)
         {
@@ -124,11 +140,57 @@ namespace PullSub.Bridge
 
         private static IEnumerable<IPullSubTopicCatalogProvider> CreateProviders()
         {
-            var providerType = typeof(IPullSubTopicCatalogProvider);
-            var allAssemblies = AppDomain.CurrentDomain.GetAssemblies();
+            const string generatedProviderTypeName = "PullSub.Generated.PullSubGeneratedTopicCatalogProvider";
+            var providerContract = typeof(IPullSubTopicCatalogProvider);
 
-            foreach (var assembly in allAssemblies)
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
+                if (assembly == null || assembly.IsDynamic)
+                    continue;
+
+                Type providerType;
+                try
+                {
+                    providerType = assembly.GetType(generatedProviderTypeName, throwOnError: false, ignoreCase: false);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (providerType == null || providerType.IsAbstract || providerType.IsInterface)
+                    continue;
+
+                if (!providerContract.IsAssignableFrom(providerType))
+                    continue;
+
+                if (providerType.GetConstructor(Type.EmptyTypes) == null)
+                    continue;
+
+                IPullSubTopicCatalogProvider provider;
+                try
+                {
+                    provider = (IPullSubTopicCatalogProvider)Activator.CreateInstance(providerType);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (provider != null)
+                {
+                    yield return provider;
+                    yield break;
+                }
+            }
+
+            // Compatibility fallback: if generated provider is unavailable,
+            // discover any manually implemented providers like the previous behavior.
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (assembly == null || assembly.IsDynamic)
+                    continue;
+
                 Type[] types;
                 try
                 {
@@ -148,7 +210,10 @@ namespace PullSub.Bridge
                     if (type == null || type.IsAbstract || type.IsInterface)
                         continue;
 
-                    if (!providerType.IsAssignableFrom(type))
+                    if (string.Equals(type.FullName, generatedProviderTypeName, StringComparison.Ordinal))
+                        continue;
+
+                    if (!providerContract.IsAssignableFrom(type))
                         continue;
 
                     if (type.GetConstructor(Type.EmptyTypes) == null)

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using PullSub.Core;
@@ -28,15 +29,26 @@ namespace PullSub.Bridge
         [SerializeField] private PullSubMqttClient _client;
         [SerializeField] private List<PullSubDataCacheTopicBinding> _topics = new List<PullSubDataCacheTopicBinding>();
 
-        private readonly Dictionary<PullSubTopicKey, IPullSubTopicRegistration> _registrations =
-            new Dictionary<PullSubTopicKey, IPullSubTopicRegistration>();
+        private readonly object _gate = new object();
+        private readonly Dictionary<PullSubTopicKey, IPullSubSubscriptionLease> _subscriptions =
+            new Dictionary<PullSubTopicKey, IPullSubSubscriptionLease>();
 
         private readonly Dictionary<PullSubTopicKey, PullSubDataCacheTopicStatus> _statuses =
             new Dictionary<PullSubTopicKey, PullSubDataCacheTopicStatus>();
 
+        private PullSubContext _context;
         private CancellationTokenSource _lifecycleCts;
 
-        public IReadOnlyCollection<PullSubDataCacheTopicStatus> TopicStatuses => _statuses.Values;
+        public IReadOnlyCollection<PullSubDataCacheTopicStatus> TopicStatuses
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _statuses.Values.ToArray();
+                }
+            }
+        }
 
         private void Start()
         {
@@ -67,6 +79,12 @@ namespace PullSub.Bridge
                 return;
             }
 
+            lock (_gate)
+            {
+                _context?.Dispose();
+                _context = _client.Runtime.CreateContext();
+            }
+
             var tasks = new List<UniTask>();
             foreach (var binding in _topics)
             {
@@ -86,7 +104,7 @@ namespace PullSub.Bridge
                 return;
             }
 
-            if (_registrations.ContainsKey(key))
+            if (!TryReserveSubscriptionSlot(key))
             {
                 SetStatus(key, isSubscribed: false, error: "Duplicate topic key in PullSubDataCache settings.");
                 return;
@@ -94,40 +112,55 @@ namespace PullSub.Bridge
 
             if (!PullSubTopicCatalog.TryGet(key, out var registration))
             {
+                ClearSubscriptionSlot(key);
                 SetStatus(key, isSubscribed: false, error: $"Topic key '{key}' is not registered in PullSubTopicCatalog.");
+                return;
+            }
+
+            PullSubContext context;
+            lock (_gate)
+            {
+                context = _context;
+            }
+
+            if (context == null)
+            {
+                ClearSubscriptionSlot(key);
+                SetStatus(key, isSubscribed: false, error: "PullSubContext is not available.");
                 return;
             }
 
             try
             {
-                await registration.SubscribeAsync(_client.Runtime, binding.subscribeQos, cancellationToken);
-                _registrations[key] = registration;
+                var subscription = await registration.SubscribeAsync(context, binding.subscribeQos, cancellationToken);
+                CommitSubscriptionSlot(key, subscription);
                 SetStatus(key, isSubscribed: true, error: null);
             }
             catch (OperationCanceledException)
             {
+                ClearSubscriptionSlot(key);
                 SetStatus(key, isSubscribed: false, error: "Canceled.");
             }
             catch (Exception ex)
             {
+                ClearSubscriptionSlot(key);
                 SetStatus(key, isSubscribed: false, error: ex.Message);
             }
         }
 
         public bool HasValue<T>(IPullSubTopic<T> topic)
         {
-            return GetDataHandle(topic).HasValue;
+            if (!TryGetDataHandleInternal(topic, out var handle))
+                return false;
+
+            return handle.HasValue;
         }
 
         public bool TryGet<T>(IPullSubTopic<T> topic, out T value)
         {
-            if (topic == null)
-                throw new ArgumentNullException(nameof(topic));
-
-            var handle = GetDataHandle(topic);
-            if (!handle.HasValue)
+            value = default;
+            if (!TryGetDataHandleInternal(topic, out var handle) || !handle.HasValue)
             {
-                value = default;
                 return false;
             }
 
@@ -137,13 +170,9 @@ namespace PullSub.Bridge
 
         public bool TryGetTimestampUtc<T>(IPullSubTopic<T> topic, out DateTime timestampUtc)
         {
-            if (topic == null)
-                throw new ArgumentNullException(nameof(topic));
-
-            var handle = GetDataHandle(topic);
-            if (!handle.HasValue)
+            timestampUtc = default;
+            if (!TryGetDataHandleInternal(topic, out var handle) || !handle.HasValue)
             {
-                timestampUtc = default;
                 return false;
             }
 
@@ -159,7 +188,17 @@ namespace PullSub.Bridge
             if (_client == null || _client.Runtime == null)
                 throw new InvalidOperationException("[PullSubDataCache] Runtime is not available.");
 
-            return _client.Runtime.GetDataHandle<T>(topic.TopicName);
+            try
+            {
+                return _client.Runtime.GetDataHandle<T>(topic.TopicName);
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new InvalidOperationException(
+                    "[PullSubDataCache] Data handle is not available yet. " +
+                    "Ensure the topic is subscribed and startup has completed before calling GetDataHandle.",
+                    ex);
+            }
         }
 
         public UniTask UnsubscribeManagedTopicsAsync(CancellationToken cancellationToken = default)
@@ -173,50 +212,137 @@ namespace PullSub.Bridge
             _lifecycleCts?.Dispose();
             _lifecycleCts = null;
 
-            UnsubscribeAllAsync(CancellationToken.None).Forget();
+            PullSubContext context;
+            lock (_gate)
+            {
+                context = _context;
+                _context = null;
+                _subscriptions.Clear();
+
+                foreach (var status in _statuses.Values)
+                {
+                    status.isSubscribed = false;
+                }
+            }
+
+            context?.Dispose();
         }
 
         private async UniTask UnsubscribeAllAsync(CancellationToken cancellationToken)
         {
-            if (_client == null || _client.Runtime == null)
-                return;
+            KeyValuePair<PullSubTopicKey, IPullSubSubscriptionLease>[] subscriptions;
+            PullSubContext context;
+            lock (_gate)
+            {
+                subscriptions = _subscriptions
+                    .Where(pair => pair.Value != null)
+                    .ToArray();
 
-            var tasks = new List<UniTask>(_registrations.Count);
-            foreach (var pair in _registrations)
+                _subscriptions.Clear();
+                context = _context;
+                _context = null;
+            }
+
+            var tasks = new List<UniTask>(subscriptions.Length);
+            foreach (var pair in subscriptions)
             {
                 tasks.Add(UnsubscribeSingleAsync(pair.Key, pair.Value, cancellationToken));
             }
 
             await UniTask.WhenAll(tasks);
-            _registrations.Clear();
+
+            if (context != null)
+                await context.DisposeAsync();
         }
 
         private async UniTask UnsubscribeSingleAsync(
             PullSubTopicKey key,
-            IPullSubTopicRegistration registration,
+            IPullSubSubscriptionLease subscription,
             CancellationToken cancellationToken)
         {
             try
             {
-                await registration.UnsubscribeAsync(_client.Runtime, cancellationToken);
+                var result = await subscription.UnsubscribeAsync(cancellationToken);
+                if (result == PullSubUnsubscribeResult.Failed)
+                {
+                    SetStatus(key, isSubscribed: false, error: "Unsubscribe failed.");
+                    return;
+                }
+
                 SetStatus(key, isSubscribed: false, error: null);
             }
-            catch
+            catch (OperationCanceledException)
             {
-                // Best effort cleanup.
+                SetStatus(key, isSubscribed: false, error: "Canceled.");
+            }
+            catch (Exception ex)
+            {
+                SetStatus(key, isSubscribed: false, error: ex.Message);
+            }
+        }
+
+        private bool TryGetDataHandleInternal<T>(IPullSubTopic<T> topic, out PullSubDataHandle<T> handle)
+        {
+            if (topic == null)
+                throw new ArgumentNullException(nameof(topic));
+
+            handle = default;
+            if (_client == null || _client.Runtime == null)
+                return false;
+
+            try
+            {
+                handle = _client.Runtime.GetDataHandle<T>(topic.TopicName);
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                // Topic is not subscribed yet (e.g., startup race). Treat as "no value yet".
+                return false;
             }
         }
 
         private void SetStatus(PullSubTopicKey key, bool isSubscribed, string error)
         {
-            if (!_statuses.TryGetValue(key, out var status))
+            lock (_gate)
             {
-                status = new PullSubDataCacheTopicStatus { key = key };
-                _statuses[key] = status;
-            }
+                if (!_statuses.TryGetValue(key, out var status))
+                {
+                    status = new PullSubDataCacheTopicStatus { key = key };
+                    _statuses[key] = status;
+                }
 
-            status.isSubscribed = isSubscribed;
-            status.error = error;
+                status.isSubscribed = isSubscribed;
+                status.error = error;
+            }
+        }
+
+        private bool TryReserveSubscriptionSlot(PullSubTopicKey key)
+        {
+            lock (_gate)
+            {
+                if (_subscriptions.ContainsKey(key))
+                    return false;
+
+                _subscriptions[key] = null;
+                return true;
+            }
+        }
+
+        private void CommitSubscriptionSlot(PullSubTopicKey key, IPullSubSubscriptionLease subscription)
+        {
+            lock (_gate)
+            {
+                _subscriptions[key] = subscription;
+            }
+        }
+
+        private void ClearSubscriptionSlot(PullSubTopicKey key)
+        {
+            lock (_gate)
+            {
+                _subscriptions.Remove(key);
+            }
         }
     }
 }

@@ -6,6 +6,31 @@ namespace PullSub.Core
 {
     public static class PullSubRuntimeExtensions
     {
+        public static PullSubContext CreateContext(this PullSubRuntime runtime)
+        {
+            if (runtime == null)
+                throw new ArgumentNullException(nameof(runtime));
+
+            return new PullSubContext(runtime);
+        }
+
+        public static async Task<PullSubSubscription<T>> SubscribeAsync<T>(
+            this PullSubRuntime runtime,
+            IPullSubTopic<T> topic,
+            PullSubQualityOfServiceLevel subscribeQos = PullSubQualityOfServiceLevel.AtLeastOnce,
+            CancellationToken cancellationToken = default)
+        {
+            if (runtime == null)
+                throw new ArgumentNullException(nameof(runtime));
+
+            if (topic == null)
+                throw new ArgumentNullException(nameof(topic));
+
+            await runtime.SubscribeDataAsync(topic, subscribeQos, cancellationToken).ConfigureAwait(false);
+            var handle = runtime.GetDataHandle(topic);
+            return new PullSubSubscription<T>(runtime, topic, handle);
+        }
+
         public static Task SubscribeDataAsync<T>(
             this PullSubRuntime runtime,
             string topic,
@@ -195,7 +220,7 @@ namespace PullSub.Core
                 throw;
             }
 
-            return new PullSubQueueHandlerRegistration(registrationCts, registrationLinkedCts, loopTask);
+            return new PullSubQueueHandlerRegistration(topic, registrationCts, registrationLinkedCts, loopTask);
         }
 
         public static Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync(

@@ -38,6 +38,22 @@ namespace PullSub.Core
         public bool HasValue => _cache.TryGet(out _, out _);
 
         /// <summary>
+        /// 最新値を取得します。未到着の場合は false を返します。
+        /// </summary>
+        public bool TryGet(out T value)
+        {
+            return _cache.TryGet(out value, out _);
+        }
+
+        /// <summary>
+        /// 最新値と発生時刻（UTC）を取得します。未到着の場合は false を返します。
+        /// </summary>
+        public bool TryGet(out T value, out System.DateTime timestampUtc)
+        {
+            return _cache.TryGet(out value, out timestampUtc);
+        }
+
+        /// <summary>
         /// データ未到着のときに返す値を明示したい場合。
         /// </summary>
         public T GetValueOrDefault(T fallback) =>
