@@ -2,7 +2,7 @@ using System;
 
 namespace PullSub.Mqtt
 {
-    public sealed class MqttClientProfile : IEquatable<MqttClientProfile>
+    internal sealed class MqttClientProfile : IEquatable<MqttClientProfile>
     {
         public MqttClientProfile(
             string brokerHost,

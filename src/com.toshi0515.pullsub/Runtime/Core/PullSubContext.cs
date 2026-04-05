@@ -73,11 +73,39 @@ namespace PullSub.Core
             }
         }
 
+        private sealed class ContextSubscriptionLease : IDisposable
+        {
+            private readonly Func<CancellationToken, Task<PullSubUnsubscribeResult>> _unsubscribeAsync;
+            private readonly Action _dispose;
+
+            public ContextSubscriptionLease(
+                string topic,
+                Func<CancellationToken, Task<PullSubUnsubscribeResult>> unsubscribeAsync,
+                Action dispose)
+            {
+                Topic = topic ?? throw new ArgumentNullException(nameof(topic));
+                _unsubscribeAsync = unsubscribeAsync ?? throw new ArgumentNullException(nameof(unsubscribeAsync));
+                _dispose = dispose ?? throw new ArgumentNullException(nameof(dispose));
+            }
+
+            public string Topic { get; }
+
+            public Task<PullSubUnsubscribeResult> UnsubscribeAsync(CancellationToken cancellationToken = default)
+            {
+                return _unsubscribeAsync(cancellationToken);
+            }
+
+            public void Dispose()
+            {
+                _dispose();
+            }
+        }
+
         private readonly PullSubRuntime _runtime;
         private readonly object _gate = new object();
         private readonly HashSet<SubscriptionKey> _inFlightTopics = new HashSet<SubscriptionKey>();
-        private readonly Dictionary<SubscriptionKey, IPullSubSubscriptionLease> _activeSubscriptions
-            = new Dictionary<SubscriptionKey, IPullSubSubscriptionLease>();
+        private readonly Dictionary<SubscriptionKey, ContextSubscriptionLease> _activeSubscriptions
+            = new Dictionary<SubscriptionKey, ContextSubscriptionLease>();
         private string _debugLabel;
 
         private int _disposed;
@@ -112,7 +140,7 @@ namespace PullSub.Core
             }
         }
 
-        public async Task<PullSubSubscription<T>> SubscribeAsync<T>(
+        public async Task<PullSubDataSubscription<T>> SubscribeDataAsync<T>(
             IPullSubTopic<T> topic,
             PullSubQualityOfServiceLevel subscribeQos = PullSubQualityOfServiceLevel.AtLeastOnce,
             CancellationToken cancellationToken = default)
@@ -137,13 +165,13 @@ namespace PullSub.Core
                 _inFlightTopics.Add(key);
             }
 
-            PullSubSubscription<T> subscription;
+            PullSubDataSubscription<T> subscription;
             try
             {
                 // Context-side duplicate checks must happen before Runtime subscribe.
-                await _runtime.SubscribeDataAsync(topic, subscribeQos, cancellationToken).ConfigureAwait(false);
+                await _runtime.SubscribeDataTopicAsync(topic, subscribeQos, cancellationToken).ConfigureAwait(false);
                 var handle = _runtime.GetDataHandle(topic);
-                subscription = new PullSubSubscription<T>(_runtime, topic, handle);
+                subscription = new PullSubDataSubscription<T>(_runtime, topic, handle);
             }
             catch
             {
@@ -166,7 +194,7 @@ namespace PullSub.Core
                 }
                 else
                 {
-                    _activeSubscriptions[key] = subscription;
+                    _activeSubscriptions[key] = CreateLease(subscription);
                 }
             }
 
@@ -179,18 +207,119 @@ namespace PullSub.Core
             return subscription;
         }
 
-        public Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync<T>(
+        public Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
             IPullSubTopic<T> topic,
-            Func<T, CancellationToken, Task> handler,
+            Func<T, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
-            return RegisterHandlerLeaseAsync(topic, PullSubQueueOptions.Default, handler, cancellationToken);
+            return SubscribeQueueAsync(topic, PullSubQueueOptions.Default, handler, cancellationToken);
         }
 
-        public async Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync<T>(
+        public Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
+            IPullSubTopic<T> topic,
+            Func<T, ValueTask> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return SubscribeQueueAsync(topic, PullSubQueueOptions.Default, (message, _) => handler(message), cancellationToken);
+        }
+
+        public Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
+            IPullSubTopic<T> topic,
+            Action<T, CancellationToken> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return SubscribeQueueAsync(
+                topic,
+                PullSubQueueOptions.Default,
+                (message, ct) =>
+                {
+                    handler(message, ct);
+                    return default;
+                },
+                cancellationToken);
+        }
+
+        public Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
+            IPullSubTopic<T> topic,
+            Action<T> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return SubscribeQueueAsync(
+                topic,
+                PullSubQueueOptions.Default,
+                (message, _) =>
+                {
+                    handler(message);
+                    return default;
+                },
+                cancellationToken);
+        }
+
+        public Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
             IPullSubTopic<T> topic,
             PullSubQueueOptions options,
-            Func<T, CancellationToken, Task> handler,
+            Func<T, ValueTask> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return SubscribeQueueAsync(topic, options, (message, _) => handler(message), cancellationToken);
+        }
+
+        public Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
+            IPullSubTopic<T> topic,
+            PullSubQueueOptions options,
+            Action<T, CancellationToken> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return SubscribeQueueAsync(
+                topic,
+                options,
+                (message, ct) =>
+                {
+                    handler(message, ct);
+                    return default;
+                },
+                cancellationToken);
+        }
+
+        public Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
+            IPullSubTopic<T> topic,
+            PullSubQueueOptions options,
+            Action<T> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return SubscribeQueueAsync(
+                topic,
+                options,
+                (message, _) =>
+                {
+                    handler(message);
+                    return default;
+                },
+                cancellationToken);
+        }
+
+        public async Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
+            IPullSubTopic<T> topic,
+            PullSubQueueOptions options,
+            Func<T, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
             if (topic == null)
@@ -219,10 +348,10 @@ namespace PullSub.Core
                 _inFlightTopics.Add(key);
             }
 
-            PullSubQueueHandlerRegistration registration;
+            PullSubQueueSubscription registration;
             try
             {
-                registration = await _runtime.RegisterHandlerLeaseAsync(topic, options, handler, cancellationToken)
+                registration = await _runtime.SubscribeQueueAsync(topic, options, handler, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch
@@ -246,7 +375,7 @@ namespace PullSub.Core
                 }
                 else
                 {
-                    _activeSubscriptions[key] = registration;
+                    _activeSubscriptions[key] = CreateLease(registration);
                 }
             }
 
@@ -259,7 +388,7 @@ namespace PullSub.Core
             return registration;
         }
 
-        public async Task<PullSubUnsubscribeResult> UnsubscribeAsync(
+        public async Task<PullSubUnsubscribeResult> UnsubscribeDataAsync(
             string topic,
             CancellationToken cancellationToken = default)
         {
@@ -274,7 +403,7 @@ namespace PullSub.Core
                 .ConfigureAwait(false);
         }
 
-        public async Task<PullSubUnsubscribeResult> StopHandlerAsync(
+        public async Task<PullSubUnsubscribeResult> UnsubscribeQueueAsync(
             string topic,
             CancellationToken cancellationToken = default)
         {
@@ -293,7 +422,7 @@ namespace PullSub.Core
             SubscriptionKey key,
             CancellationToken cancellationToken)
         {
-            IPullSubSubscriptionLease subscription;
+            ContextSubscriptionLease subscription;
 
             lock (_gate)
             {
@@ -313,7 +442,7 @@ namespace PullSub.Core
 
             PullSubContextDebugTracker.Unregister(_runtime, this);
 
-            IPullSubSubscriptionLease[] subscriptions;
+            ContextSubscriptionLease[] subscriptions;
             lock (_gate)
             {
                 subscriptions = _activeSubscriptions.Values.ToArray();
@@ -337,7 +466,7 @@ namespace PullSub.Core
 
             PullSubContextDebugTracker.Unregister(_runtime, this);
 
-            IPullSubSubscriptionLease[] subscriptions;
+            ContextSubscriptionLease[] subscriptions;
             lock (_gate)
             {
                 subscriptions = _activeSubscriptions.Values.ToArray();
@@ -354,6 +483,28 @@ namespace PullSub.Core
         private bool IsDisposed_NoLock()
         {
             return Volatile.Read(ref _disposed) != 0;
+        }
+
+        private static ContextSubscriptionLease CreateLease<T>(PullSubDataSubscription<T> subscription)
+        {
+            if (subscription == null)
+                throw new ArgumentNullException(nameof(subscription));
+
+            return new ContextSubscriptionLease(
+                subscription.Topic,
+                subscription.UnsubscribeAsync,
+                subscription.Dispose);
+        }
+
+        private static ContextSubscriptionLease CreateLease(PullSubQueueSubscription subscription)
+        {
+            if (subscription == null)
+                throw new ArgumentNullException(nameof(subscription));
+
+            return new ContextSubscriptionLease(
+                subscription.Topic,
+                subscription.UnsubscribeAsync,
+                subscription.Dispose);
         }
 
         private void ThrowIfDisposed_NoLock()

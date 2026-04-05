@@ -16,7 +16,7 @@ namespace PullSub.Core.Tests.Integration
             await runtime.StartAsync();
 
             var topic = PullSubTopic.Create("test/context/runtime-subscribe", new SampleClassCodec());
-            await using var subscription = await runtime.SubscribeAsync(topic);
+            await using var subscription = await runtime.SubscribeDataAsync(topic);
 
             Assert.NotNull(subscription.Handle);
             Assert.Equal(topic.TopicName, subscription.Topic);
@@ -37,10 +37,10 @@ namespace PullSub.Core.Tests.Integration
             await using var context = runtime.CreateContext();
             var topic = PullSubTopic.Create("test/context/duplicate", new SampleClassCodec());
 
-            var first = await context.SubscribeAsync(topic);
+            var first = await context.SubscribeDataAsync(topic);
             Assert.NotNull(first);
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() => context.SubscribeAsync(topic));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => context.SubscribeDataAsync(topic));
 
             Assert.Equal(1, transport.SubscribeCallCount);
 
@@ -59,11 +59,11 @@ namespace PullSub.Core.Tests.Integration
             await using var context = runtime.CreateContext();
             var topic = PullSubTopic.Create("test/context/parallel-duplicate", new SampleClassCodec());
 
-            var task1 = context.SubscribeAsync(topic);
-            var task2 = context.SubscribeAsync(topic);
+            var task1 = context.SubscribeDataAsync(topic);
+            var task2 = context.SubscribeDataAsync(topic);
 
-            PullSubSubscription<SampleClassPayload>? subscription1 = null;
-            PullSubSubscription<SampleClassPayload>? subscription2 = null;
+            PullSubDataSubscription<SampleClassPayload>? subscription1 = null;
+            PullSubDataSubscription<SampleClassPayload>? subscription2 = null;
             Exception? exception1 = null;
             Exception? exception2 = null;
 
@@ -101,7 +101,7 @@ namespace PullSub.Core.Tests.Integration
             await using var runtime = new PullSubRuntime(transport);
             await runtime.StartAsync();
 
-            var registration = await runtime.RegisterHandlerLeaseAsync(
+            var registration = await runtime.SubscribeQueueAsync(
                 "test/context/queue-idempotent-unsubscribe",
                 PullSubQueueOptions.Default,
                 static _ => { });

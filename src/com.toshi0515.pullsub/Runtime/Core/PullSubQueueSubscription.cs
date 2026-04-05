@@ -7,7 +7,7 @@ namespace PullSub.Core
     /// <summary>
     /// Async-disposable registration handle for a raw message handler loop.
     /// </summary>
-    public sealed class PullSubQueueHandlerRegistration : IPullSubSubscriptionLease
+    public sealed class PullSubQueueSubscription
     {
         private readonly CancellationTokenSource _registrationCts;
         private readonly CancellationTokenSource _registrationLinkedCts;
@@ -17,7 +17,7 @@ namespace PullSub.Core
         private int _stopRequested;
         private int _disposed;
 
-        internal PullSubQueueHandlerRegistration(
+        internal PullSubQueueSubscription(
             string topic,
             CancellationTokenSource registrationCts,
             CancellationTokenSource registrationLinkedCts,

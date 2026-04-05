@@ -88,11 +88,8 @@ namespace PullSub.Core.IntegrationTests
             var codec = PullSubJsonPayloadCodec<Phase0PerfDataPayload>.Default;
 
             var options = MqttConnectionOptions.Default;
-            var subscriberProfile = new MqttClientProfile(BrokerHost, BrokerPort, MqttClientIdPolicy.RandomPerStart, connectionOptions: options);
-            var publisherProfile = new MqttClientProfile(BrokerHost, BrokerPort, MqttClientIdPolicy.RandomPerStart, connectionOptions: options);
-
-            await using var subscriberTransport = new MqttTransport(subscriberProfile, options);
-            await using var publisherTransport = new MqttTransport(publisherProfile, options);
+            await using var subscriberTransport = new MqttTransport(BrokerHost, BrokerPort, options);
+            await using var publisherTransport = new MqttTransport(BrokerHost, BrokerPort, options);
             await using var subscriberRuntime = new PullSubRuntime(subscriberTransport);
             await using var publisherRuntime = new PullSubRuntime(publisherTransport);
 

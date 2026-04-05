@@ -103,7 +103,7 @@ namespace PullSub.Core
                 }
 
                 var droppedCount = 0L;
-                if (topic.QueueSubCount > 0 && TryGetDroppedCount(topic.Topic, out var dropped))
+                if (topic.QueueSubCount > 0 && _rawInbox.TryGetDroppedCount(topic.Topic, out var dropped))
                     droppedCount = dropped;
 
                 var queueHandlerState = PullSubQueueHandlerDebugTracker.GetSnapshot(this, topic.Topic);
@@ -124,8 +124,8 @@ namespace PullSub.Core
 
             return new PullSubRuntimeDebugSnapshot(
                 State,
-                IsStarted,
-                IsConnected,
+                _transport.IsStarted,
+                _transport.IsConnected,
                 IsReady,
                 DateTime.UtcNow,
                 PullSubQueueHandlerDebugTracker.IsTrackingEnabled,

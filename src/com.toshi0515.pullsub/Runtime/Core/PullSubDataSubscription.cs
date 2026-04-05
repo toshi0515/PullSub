@@ -4,12 +4,12 @@ using System.Threading.Tasks;
 
 namespace PullSub.Core
 {
-    public sealed class PullSubSubscription<T> : IPullSubSubscriptionLease
+    public sealed class PullSubDataSubscription<T>
     {
         private readonly PullSubRuntime _runtime;
         private int _unsubscribeRequested;
 
-        internal PullSubSubscription(
+        internal PullSubDataSubscription(
             PullSubRuntime runtime,
             IPullSubTopic<T> topic,
             PullSubDataHandle<T> handle)

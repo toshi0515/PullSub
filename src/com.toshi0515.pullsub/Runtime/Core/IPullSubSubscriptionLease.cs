@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 
 namespace PullSub.Core
 {
-    public interface IPullSubSubscriptionLease : IDisposable, IAsyncDisposable
+    internal interface IPullSubSubscriptionLease : IDisposable, IAsyncDisposable
     {
         string Topic { get; }
 

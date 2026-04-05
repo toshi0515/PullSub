@@ -55,7 +55,7 @@ public class RobotController : MonoBehaviour
             .AddTo(this);  // Automatic disposal on OnDestroy
 
         // Subscribe and get handle in one step
-        var subscription = await context.SubscribeAsync(Topics.Position);
+        var subscription = await context.SubscribeDataAsync(Topics.Position);
 
         _positionHandle = subscription.Handle;
     }
@@ -84,11 +84,11 @@ PullSub abstracts transport protocols behind `ITransport`. You can use protocols
 
 ## When PullSub is not the right fit
 
-- **You need callbacks:** Use the Queue API's `RegisterHandlerLeaseAsync` instead.
+- **You need callbacks:** Use the Queue API's `SubscribeQueueAsync` instead.
   It provides callback-style message handling with async support, backpressure,
   and drop detection — everything a raw callback pattern lacks.
 ```csharp
-  _registration = await runtime.RegisterHandlerLeaseAsync(
+  _registration = await runtime.SubscribeQueueAsync(
       Topics.Position,
       async (pos, ct) =>
       {
@@ -129,7 +129,7 @@ Use this for data where every message must be processed in order, such as comman
 
 ```csharp
 // Handle commands one by one
-var registration = await runtime.RegisterHandlerLeaseAsync(
+var registration = await runtime.SubscribeQueueAsync(
     Topics.Command,
     async (command, ct) => await robot.ExecuteAsync(command, ct));
 ```
@@ -218,8 +218,8 @@ public class RobotController : MonoBehaviour
         var context = _client.Runtime.CreateContext()
             .AddTo(this);  // Automatic cleanup on OnDestroy
 
-        // Subscribe: returns a Subscription<T> that wraps the Handle
-        var subscription = await context.SubscribeAsync(Topics.Position);
+        // Subscribe data: returns a PullSubDataSubscription<T> that wraps the Handle
+        var subscription = await context.SubscribeDataAsync(Topics.Position);
 
         // Obtain handle from subscription and reuse it every frame
         _positionHandle = subscription.Handle;
@@ -256,7 +256,7 @@ public class CommandReceiver : MonoBehaviour
             .AddTo(this);  // Automatic cleanup on OnDestroy
 
         // Register Queue handler through Context (tracked and auto-unsubscribed)
-        await context.RegisterHandlerLeaseAsync(
+        await context.SubscribeQueueAsync(
             Topics.Command,
             async (command, ct) =>
             {
@@ -269,7 +269,7 @@ public class CommandReceiver : MonoBehaviour
             });
 
         // Later, if needed, stop just this handler while keeping other subscriptions active
-        // await context.StopHandlerAsync(Topics.Command.TopicName, cancellationToken);
+        // await context.UnsubscribeQueueAsync(Topics.Command.TopicName, cancellationToken);
 
         // Context automatically cleans up all handlers and subscriptions on OnDestroy
     }
@@ -278,11 +278,11 @@ public class CommandReceiver : MonoBehaviour
 
 **Or use Runtime directly** (manual lifecycle management):
 ```csharp
-private PullSubQueueHandlerRegistration _registration;
+private PullSubQueueSubscription _registration;
 
 private async void Start()
 {
-    _registration = await _client.Runtime.RegisterHandlerLeaseAsync(
+    _registration = await _client.Runtime.SubscribeQueueAsync(
         Topics.Command,
         async (command, ct) =>
         {
@@ -325,13 +325,11 @@ using System.Threading.Tasks;
 
 var connectionOptions = new MqttConnectionOptions();
 
-var profile = new MqttClientProfile(
+var transport = new MqttTransport(
     brokerHost: "127.0.0.1",
     brokerPort: 1883,
-    clientIdPolicy: MqttClientIdPolicy.RandomPerStart,
-    connectionOptions: connectionOptions);
-
-var transport = new MqttTransport(profile, connectionOptions);
+    connectionOptions: connectionOptions,
+    clientIdPolicy: MqttClientIdPolicy.RandomPerStart);
 
 await using var runtime = new PullSubRuntime(transport);
 
@@ -342,7 +340,7 @@ await runtime.WaitUntilConnectedAsync(cts.Token);
 
 // Create a context and subscribe
 await using var context = runtime.CreateContext();
-await using var subscription = await context.SubscribeAsync(
+await using var subscription = await context.SubscribeDataAsync(
     Topics.Position,
     cancellationToken: cts.Token);
 
@@ -364,7 +362,7 @@ while (!cts.IsCancellationRequested)
 **Context API Benefits:**
 - `context` groups multiple subscriptions for atomic cleanup
 - `await using` ensures async disposal completes (Network unsubscribe waits)
-- Type-safe via generic `SubscribeAsync<T>`
+- Type-safe via generic `SubscribeDataAsync<T>`
 - Duplicate topics in same context are prevented
 
 ### Diagnostics (.NET)
@@ -419,13 +417,13 @@ public sealed class CommandHandler : MonoBehaviour
 {
     [SerializeField] private PullSubMqttClient _client;
 
-    private PullSubQueueHandlerRegistration _lease;
+    private PullSubQueueSubscription _lease;
 
     private async void Start()
     {
         try
         {
-            _lease = await _client.Runtime.RegisterHandlerLeaseAsync(
+            _lease = await _client.Runtime.SubscribeQueueAsync(
                 Topics.RobotCommand,
                 ExecuteCommandAsync);
 
@@ -438,7 +436,7 @@ public sealed class CommandHandler : MonoBehaviour
         }
     }
 
-    private static async Task ExecuteCommandAsync(RobotCommand command, CancellationToken ct)
+    private static async ValueTask ExecuteCommandAsync(RobotCommand command, CancellationToken ct)
     {
         switch (command.Type)
         {
@@ -478,10 +476,10 @@ public sealed class RobotController : MonoBehaviour
         {
             _context = _client.Runtime.CreateContext().AddTo(this);
 
-            var positionSubscription = await _context.SubscribeAsync(Topics.Position);
+            var positionSubscription = await _context.SubscribeDataAsync(Topics.Position);
             _positionHandle = positionSubscription.Handle;
 
-            await _context.RegisterHandlerLeaseAsync(
+            await _context.SubscribeQueueAsync(
                 Topics.RobotCommand,
                 HandleCommandAsync);
         }
@@ -499,7 +497,7 @@ public sealed class RobotController : MonoBehaviour
         transform.position = new Vector3(pos.X, pos.Y, pos.Z);
     }
 
-    private async Task HandleCommandAsync(RobotCommand command, CancellationToken ct)
+    private async ValueTask HandleCommandAsync(RobotCommand command, CancellationToken ct)
     {
         if (_positionHandle?.TryGet(out var currentPos) == true)
             Debug.Log($"Current position before command: {currentPos}");
@@ -512,7 +510,7 @@ public sealed class RobotController : MonoBehaviour
         if (_context == null)
             return Task.FromResult(PullSubUnsubscribeResult.AlreadyCanceled);
 
-        return _context.StopHandlerAsync(Topics.RobotCommand.TopicName, ct);
+        return _context.UnsubscribeQueueAsync(Topics.RobotCommand.TopicName, ct);
     }
 }
 ```
@@ -524,14 +522,14 @@ Register multiple handlers and keep selective stop capability:
 ```csharp
 private async Task RegisterHandlersAsync(PullSubContext context, CancellationToken ct)
 {
-    await context.RegisterHandlerLeaseAsync(Topics.Command, HandleCommandAsync, cancellationToken: ct);
-    await context.RegisterHandlerLeaseAsync(Topics.Log, HandleLogAsync, cancellationToken: ct);
-    await context.RegisterHandlerLeaseAsync(Topics.Alert, HandleAlertAsync, cancellationToken: ct);
+    await context.SubscribeQueueAsync(Topics.Command, HandleCommandAsync, cancellationToken: ct);
+    await context.SubscribeQueueAsync(Topics.Log, HandleLogAsync, cancellationToken: ct);
+    await context.SubscribeQueueAsync(Topics.Alert, HandleAlertAsync, cancellationToken: ct);
 }
 
 private Task<PullSubUnsubscribeResult> StopOnlyCommandHandlerAsync(PullSubContext context, CancellationToken ct)
 {
-    return context.StopHandlerAsync(Topics.Command.TopicName, ct);
+    return context.UnsubscribeQueueAsync(Topics.Command.TopicName, ct);
 }
 ```
 
@@ -543,7 +541,7 @@ If you bind lifetime with `AddTo(this)`, omit `cancellationToken: destroyCancell
 |---------|-------------|-------|
 | **`lease.AddTo(this)`** | Single Queue handler owned by one MonoBehaviour | Simplest Unity lifecycle binding |
 | **`context.AddTo(this)`** | Multiple Data + Queue registrations in one component | One owner, one cleanup point |
-| **`StopHandlerAsync(topic)`** | Stop only one Queue handler | Data subscriptions and other handlers keep running |
+| **`UnsubscribeQueueAsync(topic)`** | Stop only one Queue handler | Data subscriptions and other handlers keep running |
 | **`DisposeAsync()`** | Need completion guarantee for cleanup | Waits until unsubscribe/stop finishes |
 | **`Dispose()`** | Fire-and-forget teardown is acceptable | Fast, non-blocking, fault-observed path |
 
@@ -634,7 +632,7 @@ To avoid accidental defaults caused by schema drift, share the same DTO and topi
 
 ## Connection Options
 
-Connection options are configured via `MqttConnectionOptions` and passed to `MqttClientProfile`. In Unity, these can also be set through the `PullSubMqttClient` Inspector.
+Connection options are configured via `MqttConnectionOptions` and passed to `MqttTransport`. In Unity, these can also be set through the `PullSubMqttClient` Inspector.
 
 ### Credentials
 
@@ -652,10 +650,9 @@ var connectionOptions = new MqttConnectionOptions(
         allowUntrustedCertificates: false,
         targetHost: "mqtt.example.com"));
 
-var profile = new MqttClientProfile(
+var transport = new MqttTransport(
     brokerHost: "mqtt.example.com",
     brokerPort: 8883,
-    clientIdPolicy: MqttClientIdPolicy.RandomPerStart,
     connectionOptions: connectionOptions);
 ```
 
@@ -703,12 +700,9 @@ await runtime.SubscribeDataAsync(Topics.Position,
 Task StartAsync(CancellationToken ct = default)
 Task WaitUntilConnectedAsync(CancellationToken ct = default)
 Task DisconnectAsync(CancellationToken ct = default)
-Task ShutdownAsync(CancellationToken ct = default)
 ValueTask DisposeAsync()
 
 PullSubState State { get; }   // NotStarted | Starting | Ready | Reconnecting | Stopped | Disposed
-bool IsStarted { get; }
-bool IsConnected { get; }
 bool IsReady { get; }
 ```
 
@@ -722,13 +716,13 @@ PullSubContext CreateContext(this PullSubRuntime runtime)
 
 // Subscribe through context (recommended, instance methods on PullSubContext).
 // Returns a Subscription<T> containing the Handle and unsubscribe capability.
-Task<PullSubSubscription<T>> SubscribeAsync<T>(
+Task<PullSubDataSubscription<T>> SubscribeDataAsync<T>(
     IPullSubTopic<T> topic,
     PullSubQualityOfServiceLevel subscribeQos = AtLeastOnce,
     CancellationToken ct = default)
 
 // Unsubscribe an individual topic
-Task<PullSubUnsubscribeResult> UnsubscribeAsync(
+Task<PullSubUnsubscribeResult> UnsubscribeDataAsync(
     string topic,
     CancellationToken ct = default)
 
@@ -745,7 +739,7 @@ PullSubContext AddTo(this PullSubContext context, MonoBehaviour behaviour)
 PullSubContext AddTo(this PullSubContext context, CancellationToken cancellationToken)
 ```
 
-**PullSubSubscription\<T\>** (returned by `SubscribeAsync<T>`):
+**PullSubDataSubscription\<T\>** (returned by `SubscribeDataAsync<T>`):
 ```csharp
 PullSubDataHandle<T> Handle { get; }  // Access latest value
 string Topic { get; }
@@ -764,10 +758,10 @@ bool TryGet(out T value, out DateTime timestampUtc)
 Task<PullSubUnsubscribeResult> UnsubscribeAsync(CancellationToken ct = default)
 
 // Unity: Bind subscription to MonoBehaviour lifecycle
-PullSubSubscription<T> AddTo<T>(this PullSubSubscription<T> sub, MonoBehaviour behaviour)
+PullSubDataSubscription<T> AddTo<T>(this PullSubDataSubscription<T> sub, MonoBehaviour behaviour)
 
 // Unity/General: Bind subscription to any cancellation token lifecycle
-PullSubSubscription<T> AddTo<T>(this PullSubSubscription<T> sub, CancellationToken cancellationToken)
+PullSubDataSubscription<T> AddTo<T>(this PullSubDataSubscription<T> sub, CancellationToken cancellationToken)
 ```
 
 **PullSubUnsubscribeResult** (enum):
@@ -780,31 +774,47 @@ Failed = 2,            // Unsubscribe failed
 **Queue API through Context** (unified handler lifecycle):
 ```csharp
 // Register a handler loop with Context management
-Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync<T>(
+Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
     IPullSubTopic<T> topic,
-    Func<T, CancellationToken, Task> handler,
+    Func<T, CancellationToken, ValueTask> handler,
     CancellationToken ct = default)
 
-Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync<T>(
+Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
     IPullSubTopic<T> topic,
     PullSubQueueOptions options,
-    Func<T, CancellationToken, Task> handler,
+    Func<T, CancellationToken, ValueTask> handler,
     CancellationToken ct = default)
 
 // Stop a specific Queue handler (stops only the Queue, Data subscriptions unaffected)
-Task<PullSubUnsubscribeResult> StopHandlerAsync(
+Task<PullSubUnsubscribeResult> UnsubscribeQueueAsync(
     string topic,
     CancellationToken ct = default)
 
 // Unity: Bind Queue handler to MonoBehaviour lifecycle
-PullSubQueueHandlerRegistration AddTo(
-    this PullSubQueueHandlerRegistration registration,
+PullSubQueueSubscription AddTo(
+    this PullSubQueueSubscription registration,
     MonoBehaviour behaviour)
 
 // Unity/General: Bind Queue handler to any cancellation token lifecycle
-PullSubQueueHandlerRegistration AddTo(
-    this PullSubQueueHandlerRegistration registration,
+PullSubQueueSubscription AddTo(
+    this PullSubQueueSubscription registration,
     CancellationToken cancellationToken)
+```
+
+**Queue API on Unity main thread** (Bridge extensions):
+```csharp
+// Available on PullSubContext / PullSubRuntime
+// PullSubMqttClient is lifecycle/configuration only. Use _client.Runtime.
+Task<PullSubQueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
+    IPullSubTopic<T> topic,
+    Func<T, CancellationToken, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<PullSubQueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
+    IPullSubTopic<T> topic,
+    PullSubQueueOptions options,
+    Func<T, CancellationToken, ValueTask> handler,
+    CancellationToken ct = default)
 ```
 
 ### Data API (Low-level access)
@@ -823,9 +833,6 @@ Task UnsubscribeDataAsync<T>(IPullSubTopic<T> topic,
 
 // Access the latest value
 PullSubDataHandle<T> GetDataHandle<T>(IPullSubTopic<T> topic)
-T GetData<T>(IPullSubTopic<T> topic, T defaultValue = default)
-bool TryGetData<T>(string topic, out T value)
-bool TryGetData<T>(string topic, out T value, out DateTime timestampUtc)
 
 // Wait for the first message to arrive
 Task<T> WaitForFirstDataAsync<T>(IPullSubTopic<T> topic,
@@ -836,17 +843,19 @@ Task<T> WaitForFirstDataAsync<T>(IPullSubTopic<T> topic,
 
 Queue API can be used through Context (recommended for lifecycle management) or directly on Runtime (low-level).
 
-**Through Context** (see Context API section above for RegisterHandlerLeaseAsync):
+Low-level polling surface is intentionally minimal: use `ReceiveQueueAsync` for direct queue reads.
+
+**Through Context** (see Context API section above for SubscribeQueueAsync):
 ```csharp
 // Context automatically tracks and unsubscribes Queue handlers on disposal
 await using var context = runtime.CreateContext();
-var registration = await context.RegisterHandlerLeaseAsync(
+var registration = await context.SubscribeQueueAsync(
     topic,
     async (message, ct) => { /* handle message */ },
     ct);
 
 // Stop a specific Queue handler (All Data subscriptions in context remain active)
-await context.StopHandlerAsync(topic, cancellationToken);
+await context.UnsubscribeQueueAsync(topic, cancellationToken);
 
 // Dispose all handlers and subscriptions in context
 await context.DisposeAsync();
@@ -863,18 +872,16 @@ Task UnsubscribeQueueAsync(string topic, CancellationToken ct = default)
 // Receive messages
 Task<PullSubQueueMessage> ReceiveQueueAsync(string topic,
     CancellationToken ct = default)
-bool TryDequeue(string topic, out PullSubQueueMessage message)
-bool TryGetDroppedCount(string topic, out long droppedCount)
 
 // Register a handler loop (Runtime-level, not Context-tracked)
-Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync<T>(
+Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
     IPullSubTopic<T> topic,
-    Func<T, CancellationToken, Task> handler,
+    Func<T, CancellationToken, ValueTask> handler,
     CancellationToken ct = default)
-Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync<T>(
+Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
     IPullSubTopic<T> topic,
     PullSubQueueOptions options,
-    Func<T, CancellationToken, Task> handler,
+    Func<T, CancellationToken, ValueTask> handler,
     CancellationToken ct = default)
 ```
 
@@ -932,7 +939,7 @@ byte[] Payload { get; }
 DateTime ReceivedUtc { get; }
 ```
 
-### PullSubQueueHandlerRegistration
+### PullSubQueueSubscription
 
 ```csharp
 // Topic being handled

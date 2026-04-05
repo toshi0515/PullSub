@@ -65,8 +65,6 @@ namespace PullSub.Core
             }
         }
 
-        public bool IsStarted => !IsDisposeRequested && _transport.IsStarted;
-        public bool IsConnected => !IsDisposeRequested && _transport.IsConnected;
         public bool IsReady => !IsDisposeRequested && State == PullSubState.Ready;
 
         /// <summary>
@@ -201,27 +199,6 @@ namespace PullSub.Core
                 _startStopGate.Release();
                 linkedCts?.Dispose();
             }
-        }
-
-        /// <summary>
-        /// Requests bounded disconnect with the default timeout (3 seconds).
-        /// Usually callers do not need this when using DisposeAsync, because DisposeAsync already performs bounded shutdown internally.
-        /// </summary>
-        public Task ShutdownAsync(CancellationToken cancellationToken = default)
-        {
-            return ShutdownAsync(TimeSpan.FromSeconds(3), cancellationToken);
-        }
-
-        /// <summary>
-        /// Requests bounded disconnect with a custom timeout.
-        /// Usually callers do not need this when using DisposeAsync, because DisposeAsync already performs bounded shutdown internally.
-        /// </summary>
-        public async Task ShutdownAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
-        {
-            if (IsDisposeRequested)
-                return;
-
-            await _shutdownCoordinator.RunAsync(DisconnectAsync, timeout, cancellationToken);
         }
 
         public async ValueTask DisposeAsync()

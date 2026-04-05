@@ -7,7 +7,7 @@
 ### Added
 - Initial release.
 - Data API for polling the latest typed value (`SubscribeDataAsync`, `GetDataHandle`).
-- Queue API for ordered message handling (`RegisterHandlerLeaseAsync`, `ReceiveQueueAsync`).
+- Queue API for ordered message handling (`SubscribeQueueAsync`, `ReceiveQueueAsync`).
 - JSON and flat JSON payload codecs out of the box.
 - MQTT transport via MQTTnet v4.3.x (`PullSub.Mqtt`).
 - Custom transport support via `ITransport`.

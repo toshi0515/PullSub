@@ -59,99 +59,6 @@ namespace PullSub.Bridge
                 clientIdText);
         }
 
-        /// <summary>
-        /// Registers a raw message handler for the specified topic.
-        /// This method requires the client to be enabled.
-        /// Call this method from Unity main thread. The handler runs on the await continuation
-        /// of <see cref="PullSubRuntime.ReceiveQueueAsync"/>, which uses UnitySynchronizationContext.
-        /// </summary>
-        /// <param name="topic">Exact-match topic name.</param>
-        /// <param name="options">Queue options. maxQueueDepth must be greater than zero.</param>
-        /// <param name="handler">Async handler invoked for each received message.</param>
-        /// <param name="cancellationToken">Optional caller cancellation token.</param>
-        public async Task RegisterHandlerAsync(
-            string topic,
-            PullSubQueueOptions options,
-            Func<PullSubQueueMessage, CancellationToken, Task> handler,
-            CancellationToken cancellationToken = default)
-        {
-            ValidateRawHandlerArguments(topic, options, handler);
-            var runtime = EnsureRuntimeForRawHandlerRegistration();
-            var operationToken = CreateLinkedOperationToken(_lifecycleCts.Token, cancellationToken, out var linkedCts);
-
-            try
-            {
-                await runtime.RegisterHandlerAsync(topic, options, handler, operationToken);
-            }
-            finally
-            {
-                linkedCts?.Dispose();
-            }
-        }
-
-        /// <summary>
-        /// Registers a raw message handler and returns an async-disposable handle.
-        /// The returned handle is created only after the underlying subscribe operation succeeds.
-        /// </summary>
-        public async Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync(
-            string topic,
-            PullSubQueueOptions options,
-            Func<PullSubQueueMessage, CancellationToken, Task> handler,
-            CancellationToken cancellationToken = default)
-        {
-            ValidateRawHandlerArguments(topic, options, handler);
-            var runtime = EnsureRuntimeForRawHandlerRegistration();
-            var operationToken = CreateLinkedOperationToken(_lifecycleCts.Token, cancellationToken, out var linkedCts);
-
-            try
-            {
-                var registration = await runtime.RegisterHandlerLeaseAsync(topic, options, handler, operationToken);
-
-                // Keep bridge-linked CTS alive while the lease is active so lifecycle/caller cancellation
-                // can continue to propagate into the Core lease loop.
-                if (linkedCts != null)
-                {
-                    var linkedToDispose = linkedCts;
-                    _ = registration.Completion.ContinueWith(
-                        static (_, state) => ((CancellationTokenSource)state).Dispose(),
-                        linkedToDispose,
-                        CancellationToken.None,
-                        TaskContinuationOptions.ExecuteSynchronously,
-                        TaskScheduler.Default);
-                    linkedCts = null;
-                }
-
-                return registration;
-            }
-            finally
-            {
-                linkedCts?.Dispose();
-            }
-        }
-
-        /// <summary>
-        /// Convenience overload for synchronous message handlers.
-        /// </summary>
-        public Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync(
-            string topic,
-            PullSubQueueOptions options,
-            Action<PullSubQueueMessage> handler,
-            CancellationToken cancellationToken = default)
-        {
-            if (handler == null)
-                throw new ArgumentNullException(nameof(handler));
-
-            return RegisterHandlerLeaseAsync(
-                topic,
-                options,
-                (message, _) =>
-                {
-                    handler(message);
-                    return Task.CompletedTask;
-                },
-                cancellationToken);
-        }
-
         private void Awake()
         {
             EnsureConnectionSettings();
@@ -220,15 +127,13 @@ namespace PullSub.Bridge
             var connectionOptions = _connectionSettings.ToConnectionOptions();
             WarnIfInsecureTlsOptionsEnabled(connectionOptions);
 
-            var profile = new MqttClientProfile(
-                brokerHost: _connectionSettings.BrokerHost,
-                brokerPort: _connectionSettings.BrokerPort,
-                clientIdPolicy: _connectionSettings.ClientIdPolicy,
-                fixedClientId: _connectionSettings.FixedClientId,
-                connectionOptions: connectionOptions);
-
             Runtime = new PullSubRuntime(
-                transport: new MqttTransport(profile, connectionOptions),
+                transport: new MqttTransport(
+                    brokerHost: _connectionSettings.BrokerHost,
+                    brokerPort: _connectionSettings.BrokerPort,
+                    connectionOptions: connectionOptions,
+                    clientIdPolicy: _connectionSettings.ClientIdPolicy,
+                    fixedClientId: _connectionSettings.FixedClientId),
                 log: message => Debug.Log(message),
                 logWarning: message => Debug.LogWarning(message),
                 logError: message => Debug.LogError(message),
@@ -242,7 +147,7 @@ namespace PullSub.Bridge
             var tls = connectionOptions.Tls;
             var transport = connectionOptions.Transport;
 
-            // Ws + TLS 有効は Transport ログで警告済みのためここでは追加警告しない
+            // Ws + TLS enabled is already warned by transport logs; avoid duplicate warnings here.
             if (!tls.Enabled || transport.Kind == MqttTransportKind.Ws)
                 return;
 
@@ -278,59 +183,6 @@ namespace PullSub.Bridge
                 Debug.LogError($"[PullSubMqttClient] Release failed: {ex.Message}");
                 Debug.LogException(ex);
             }
-        }
-
-        private static CancellationToken CreateLinkedOperationToken(
-            CancellationToken first,
-            CancellationToken second,
-            out CancellationTokenSource linkedCts)
-        {
-            if (!first.CanBeCanceled)
-            {
-                linkedCts = null;
-                return second;
-            }
-
-            if (!second.CanBeCanceled)
-            {
-                linkedCts = null;
-                return first;
-            }
-
-            linkedCts = CancellationTokenSource.CreateLinkedTokenSource(first, second);
-            return linkedCts.Token;
-        }
-
-        private static void ValidateRawHandlerArguments(
-            string topic,
-            PullSubQueueOptions options,
-            Func<PullSubQueueMessage, CancellationToken, Task> handler)
-        {
-            if (string.IsNullOrWhiteSpace(topic))
-                throw new ArgumentException("topic is required.", nameof(topic));
-
-            if (options == null)
-                throw new ArgumentNullException(nameof(options));
-
-            if (handler == null)
-                throw new ArgumentNullException(nameof(handler));
-        }
-
-        private PullSubRuntime EnsureRuntimeForRawHandlerRegistration()
-        {
-            EnsureRuntime();
-
-            var runtime = Runtime;
-            if (runtime == null)
-                throw new InvalidOperationException("PullSubMqttClient runtime is not initialized.");
-
-            if (_lifecycleCts == null)
-            {
-                throw new InvalidOperationException(
-                    "PullSubMqttClient is not enabled. Call raw handler registration APIs after OnEnable.");
-            }
-
-            return runtime;
         }
 
         private void ResetLifecycleCts()

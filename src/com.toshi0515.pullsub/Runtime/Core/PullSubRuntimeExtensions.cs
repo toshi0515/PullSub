@@ -16,7 +16,7 @@ namespace PullSub.Core
             return context;
         }
 
-        public static async Task<PullSubSubscription<T>> SubscribeAsync<T>(
+        public static async Task<PullSubDataSubscription<T>> SubscribeDataAsync<T>(
             this PullSubRuntime runtime,
             IPullSubTopic<T> topic,
             PullSubQualityOfServiceLevel subscribeQos = PullSubQualityOfServiceLevel.AtLeastOnce,
@@ -28,12 +28,12 @@ namespace PullSub.Core
             if (topic == null)
                 throw new ArgumentNullException(nameof(topic));
 
-            await runtime.SubscribeDataAsync(topic, subscribeQos, cancellationToken).ConfigureAwait(false);
+            await runtime.SubscribeDataTopicAsync(topic, subscribeQos, cancellationToken).ConfigureAwait(false);
             var handle = runtime.GetDataHandle(topic);
-            return new PullSubSubscription<T>(runtime, topic, handle);
+            return new PullSubDataSubscription<T>(runtime, topic, handle);
         }
 
-        public static Task SubscribeDataAsync<T>(
+        internal static Task SubscribeDataAsync<T>(
             this PullSubRuntime runtime,
             string topic,
             CancellationToken cancellationToken = default)
@@ -44,7 +44,7 @@ namespace PullSub.Core
                 cancellationToken: cancellationToken);
         }
 
-        public static Task SubscribeDataAsync<T>(
+        internal static Task SubscribeDataAsync<T>(
             this PullSubRuntime runtime,
             string topic,
             PullSubQualityOfServiceLevel subscribeQos,
@@ -81,25 +81,77 @@ namespace PullSub.Core
             return DecodeOrThrow(topic, message.Payload, codec);
         }
 
-        public static Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync<T>(
+        public static Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
             this PullSubRuntime runtime,
             IPullSubTopic<T> topic,
-            Func<T, CancellationToken, Task> handler,
+            Func<T, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
-            return runtime.RegisterHandlerLeaseAsync(
+            return runtime.SubscribeQueueAsync(
                 topic,
                 PullSubQueueOptions.Default,
                 handler,
                 cancellationToken);
         }
 
-        public static Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync<T>(
+        public static Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
+            this PullSubRuntime runtime,
+            IPullSubTopic<T> topic,
+            Func<T, ValueTask> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return runtime.SubscribeQueueAsync(topic, PullSubQueueOptions.Default, (message, _) => handler(message), cancellationToken);
+        }
+
+        public static Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
+            this PullSubRuntime runtime,
+            IPullSubTopic<T> topic,
+            Action<T, CancellationToken> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return runtime.SubscribeQueueAsync(
+                topic,
+                PullSubQueueOptions.Default,
+                (message, ct) =>
+                {
+                    handler(message, ct);
+                    return default;
+                },
+                cancellationToken);
+        }
+
+        public static Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
+            this PullSubRuntime runtime,
+            IPullSubTopic<T> topic,
+            Action<T> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return runtime.SubscribeQueueAsync(
+                topic,
+                PullSubQueueOptions.Default,
+                (message, _) =>
+                {
+                    handler(message);
+                    return default;
+                },
+                cancellationToken);
+        }
+
+        public static Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
             this PullSubRuntime runtime,
             string topic,
             PullSubQueueOptions options,
             IPayloadCodec<T> codec,
-            Func<T, CancellationToken, Task> handler,
+            Func<T, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
             if (codec == null)
@@ -108,22 +160,82 @@ namespace PullSub.Core
             if (handler == null)
                 throw new ArgumentNullException(nameof(handler));
 
-            return runtime.RegisterHandlerLeaseAsync(
+            return runtime.SubscribeQueueAsync(
                 topic,
                 options,
                 async (message, ct) =>
                 {
                     var value = DecodeOrThrow(topic, message.Payload, codec);
-                    await handler(value, ct);
+                    await handler(value, ct).ConfigureAwait(false);
                 },
                 cancellationToken);
         }
 
-        public static Task RegisterHandlerAsync(
+        public static Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
             this PullSubRuntime runtime,
             string topic,
             PullSubQueueOptions options,
-            Func<PullSubQueueMessage, CancellationToken, Task> handler,
+            IPayloadCodec<T> codec,
+            Func<T, ValueTask> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return runtime.SubscribeQueueAsync(topic, options, codec, (message, _) => handler(message), cancellationToken);
+        }
+
+        public static Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
+            this PullSubRuntime runtime,
+            string topic,
+            PullSubQueueOptions options,
+            IPayloadCodec<T> codec,
+            Action<T, CancellationToken> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return runtime.SubscribeQueueAsync(
+                topic,
+                options,
+                codec,
+                (message, ct) =>
+                {
+                    handler(message, ct);
+                    return default;
+                },
+                cancellationToken);
+        }
+
+        public static Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
+            this PullSubRuntime runtime,
+            string topic,
+            PullSubQueueOptions options,
+            IPayloadCodec<T> codec,
+            Action<T> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return runtime.SubscribeQueueAsync(
+                topic,
+                options,
+                codec,
+                (message, _) =>
+                {
+                    handler(message);
+                    return default;
+                },
+                cancellationToken);
+        }
+
+        internal static Task SubscribeQueueLoopAsync(
+            this PullSubRuntime runtime,
+            string topic,
+            PullSubQueueOptions options,
+            Func<PullSubQueueMessage, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
             ValidateRawHandlerArguments(runtime, topic, options, handler);
@@ -137,12 +249,12 @@ namespace PullSub.Core
                 startedSignal: null);
         }
 
-        public static Task RegisterHandlerAsync(
+        internal static Task SubscribeQueueLoopAsync(
             this PullSubRuntime runtime,
             string topic,
             PullSubQueueOptions options,
             PullSubQualityOfServiceLevel subscribeQos,
-            Func<PullSubQueueMessage, CancellationToken, Task> handler,
+            Func<PullSubQueueMessage, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
             ValidateRawHandlerArguments(runtime, topic, options, handler);
@@ -156,33 +268,33 @@ namespace PullSub.Core
                 startedSignal: null);
         }
 
-        public static async Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync(
+        internal static async Task<PullSubQueueSubscription> SubscribeQueueAsync(
             this PullSubRuntime runtime,
             string topic,
             PullSubQueueOptions options,
-            Func<PullSubQueueMessage, CancellationToken, Task> handler,
+            Func<PullSubQueueMessage, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
-            return await RegisterHandlerLeaseAsync(runtime, topic, options, subscribeQos: null, handler, cancellationToken);
+            return await SubscribeQueueAsync(runtime, topic, options, subscribeQos: null, handler, cancellationToken);
         }
 
-        public static async Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync(
+        internal static async Task<PullSubQueueSubscription> SubscribeQueueAsync(
             this PullSubRuntime runtime,
             string topic,
             PullSubQueueOptions options,
             PullSubQualityOfServiceLevel subscribeQos,
-            Func<PullSubQueueMessage, CancellationToken, Task> handler,
+            Func<PullSubQueueMessage, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
-            return await RegisterHandlerLeaseAsync(runtime, topic, options, (PullSubQualityOfServiceLevel?)subscribeQos, handler, cancellationToken);
+            return await SubscribeQueueAsync(runtime, topic, options, (PullSubQualityOfServiceLevel?)subscribeQos, handler, cancellationToken);
         }
 
-        private static async Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync(
+        private static async Task<PullSubQueueSubscription> SubscribeQueueAsync(
             PullSubRuntime runtime,
             string topic,
             PullSubQueueOptions options,
             PullSubQualityOfServiceLevel? subscribeQos,
-            Func<PullSubQueueMessage, CancellationToken, Task> handler,
+            Func<PullSubQueueMessage, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken)
         {
             ValidateRawHandlerArguments(runtime, topic, options, handler);
@@ -223,10 +335,81 @@ namespace PullSub.Core
             }
 
             PullSubQueueHandlerDebugTracker.Register(runtime, topic, loopTask);
-            return new PullSubQueueHandlerRegistration(topic, registrationCts, registrationLinkedCts, loopTask);
+            return new PullSubQueueSubscription(topic, registrationCts, registrationLinkedCts, loopTask);
         }
 
-        public static Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync(
+        internal static Task<PullSubQueueSubscription> SubscribeQueueAsync(
+            this PullSubRuntime runtime,
+            string topic,
+            PullSubQueueOptions options,
+            Func<PullSubQueueMessage, ValueTask> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return runtime.SubscribeQueueAsync(topic, options, (message, _) => handler(message), cancellationToken);
+        }
+
+        internal static Task<PullSubQueueSubscription> SubscribeQueueAsync(
+            this PullSubRuntime runtime,
+            string topic,
+            PullSubQueueOptions options,
+            PullSubQualityOfServiceLevel subscribeQos,
+            Func<PullSubQueueMessage, ValueTask> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return runtime.SubscribeQueueAsync(topic, options, subscribeQos, (message, _) => handler(message), cancellationToken);
+        }
+
+        internal static Task<PullSubQueueSubscription> SubscribeQueueAsync(
+            this PullSubRuntime runtime,
+            string topic,
+            PullSubQueueOptions options,
+            Action<PullSubQueueMessage, CancellationToken> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return runtime.SubscribeQueueAsync(
+                topic,
+                options,
+                (message, ct) =>
+                {
+                    handler(message, ct);
+                    return default;
+                },
+                cancellationToken);
+        }
+
+        internal static Task<PullSubQueueSubscription> SubscribeQueueAsync(
+            this PullSubRuntime runtime,
+            string topic,
+            PullSubQueueOptions options,
+            PullSubQualityOfServiceLevel subscribeQos,
+            Action<PullSubQueueMessage, CancellationToken> handler,
+            CancellationToken cancellationToken = default)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+
+            return runtime.SubscribeQueueAsync(
+                topic,
+                options,
+                subscribeQos,
+                (message, ct) =>
+                {
+                    handler(message, ct);
+                    return default;
+                },
+                cancellationToken);
+        }
+
+        internal static Task<PullSubQueueSubscription> SubscribeQueueAsync(
             this PullSubRuntime runtime,
             string topic,
             PullSubQueueOptions options,
@@ -236,18 +419,18 @@ namespace PullSub.Core
             if (handler == null)
                 throw new ArgumentNullException(nameof(handler));
 
-            return runtime.RegisterHandlerLeaseAsync(
+            return runtime.SubscribeQueueAsync(
                 topic,
                 options,
                 (message, _) =>
                 {
                     handler(message);
-                    return Task.CompletedTask;
+                    return default;
                 },
                 cancellationToken);
         }
 
-        public static Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync(
+        internal static Task<PullSubQueueSubscription> SubscribeQueueAsync(
             this PullSubRuntime runtime,
             string topic,
             PullSubQueueOptions options,
@@ -258,14 +441,14 @@ namespace PullSub.Core
             if (handler == null)
                 throw new ArgumentNullException(nameof(handler));
 
-            return runtime.RegisterHandlerLeaseAsync(
+            return runtime.SubscribeQueueAsync(
                 topic,
                 options,
                 subscribeQos,
                 (message, _) =>
                 {
                     handler(message);
-                    return Task.CompletedTask;
+                    return default;
                 },
                 cancellationToken);
         }
@@ -295,7 +478,7 @@ namespace PullSub.Core
             PullSubRuntime runtime,
             string topic,
             PullSubQueueOptions options,
-            Func<PullSubQueueMessage, CancellationToken, Task> handler)
+            Func<PullSubQueueMessage, CancellationToken, ValueTask> handler)
         {
             if (runtime == null)
                 throw new ArgumentNullException(nameof(runtime));
@@ -315,7 +498,7 @@ namespace PullSub.Core
             string topic,
             PullSubQueueOptions options,
             PullSubQualityOfServiceLevel? subscribeQos,
-            Func<PullSubQueueMessage, CancellationToken, Task> handler,
+            Func<PullSubQueueMessage, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken,
             TaskCompletionSource<bool> startedSignal)
         {
@@ -363,7 +546,7 @@ namespace PullSub.Core
             }
         }
 
-        public static Task SubscribeDataAsync<T>(
+        internal static Task SubscribeDataTopicAsync<T>(
             this PullSubRuntime runtime,
             IPullSubTopic<T> topic,
             CancellationToken cancellationToken = default)
@@ -374,7 +557,7 @@ namespace PullSub.Core
                 cancellationToken: cancellationToken);
         }
 
-        public static Task SubscribeDataAsync<T>(
+        internal static Task SubscribeDataTopicAsync<T>(
             this PullSubRuntime runtime,
             IPullSubTopic<T> topic,
             PullSubQualityOfServiceLevel subscribeQos,
@@ -442,14 +625,14 @@ namespace PullSub.Core
                 cancellationToken);
         }
 
-        public static Task<PullSubQueueHandlerRegistration> RegisterHandlerLeaseAsync<T>(
+        public static Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
             this PullSubRuntime runtime,
             IPullSubTopic<T> topic,
             PullSubQueueOptions options,
-            Func<T, CancellationToken, Task> handler,
+            Func<T, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
-            return runtime.RegisterHandlerLeaseAsync<T>(
+            return runtime.SubscribeQueueAsync<T>(
                 topic.TopicName,
                 options,
                 topic.Codec,
@@ -457,7 +640,52 @@ namespace PullSub.Core
                 cancellationToken);
         }
 
-        public static T GetData<T>(
+        public static Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
+            this PullSubRuntime runtime,
+            IPullSubTopic<T> topic,
+            PullSubQueueOptions options,
+            Func<T, ValueTask> handler,
+            CancellationToken cancellationToken = default)
+        {
+            return runtime.SubscribeQueueAsync<T>(
+                topic.TopicName,
+                options,
+                topic.Codec,
+                handler,
+                cancellationToken);
+        }
+
+        public static Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
+            this PullSubRuntime runtime,
+            IPullSubTopic<T> topic,
+            PullSubQueueOptions options,
+            Action<T, CancellationToken> handler,
+            CancellationToken cancellationToken = default)
+        {
+            return runtime.SubscribeQueueAsync<T>(
+                topic.TopicName,
+                options,
+                topic.Codec,
+                handler,
+                cancellationToken);
+        }
+
+        public static Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
+            this PullSubRuntime runtime,
+            IPullSubTopic<T> topic,
+            PullSubQueueOptions options,
+            Action<T> handler,
+            CancellationToken cancellationToken = default)
+        {
+            return runtime.SubscribeQueueAsync<T>(
+                topic.TopicName,
+                options,
+                topic.Codec,
+                handler,
+                cancellationToken);
+        }
+
+        internal static T GetData<T>(
             this PullSubRuntime runtime,
             IPullSubTopic<T> topic,
             T defaultValue = default)

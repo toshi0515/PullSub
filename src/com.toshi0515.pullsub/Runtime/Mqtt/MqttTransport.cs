@@ -7,7 +7,7 @@ using PullSub.Core;
 
 namespace PullSub.Mqtt
 {
-    internal sealed class MqttTransport : ITransport, IAsyncDisposable
+    public sealed class MqttTransport : ITransport, IAsyncDisposable
     {
         private readonly IManagedMqttClient _client;
         private readonly MqttClientProfile _profile;
@@ -21,6 +21,23 @@ namespace PullSub.Mqtt
         public bool IsConnected => _client.IsConnected;
 
         public MqttTransport(
+            string brokerHost,
+            int brokerPort,
+            MqttConnectionOptions connectionOptions,
+            MqttClientIdPolicy clientIdPolicy = MqttClientIdPolicy.RandomPerStart,
+            string fixedClientId = null)
+            : this(
+                new MqttClientProfile(
+                    brokerHost,
+                    brokerPort,
+                    clientIdPolicy,
+                    fixedClientId,
+                    connectionOptions),
+                connectionOptions)
+        {
+        }
+
+        internal MqttTransport(
             MqttClientProfile profile,
             MqttConnectionOptions connectionOptions)
         {
