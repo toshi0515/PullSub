@@ -18,6 +18,11 @@ namespace PullSub.Bridge
                 throw new ArgumentNullException(nameof(behaviour));
 
             behaviour.destroyCancellationToken.Register(context.Dispose);
+#if UNITY_EDITOR
+            context.SetDebugLabel(behaviour.gameObject != null ? behaviour.gameObject.name : behaviour.name);
+            PullSubContextOwnerDebugRegistry.Register(context, behaviour);
+            behaviour.destroyCancellationToken.Register(() => PullSubContextOwnerDebugRegistry.Unregister(context));
+#endif
             return context;
         }
 

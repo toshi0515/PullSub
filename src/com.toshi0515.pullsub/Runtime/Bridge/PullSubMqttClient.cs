@@ -40,6 +40,25 @@ namespace PullSub.Bridge
 
         public PullSubRuntime Runtime { get; private set; }
 
+        internal (string Host, int Port, string ClientIdPolicy, string ClientIdText) GetConnectionSummaryForDebugMonitor()
+        {
+            if (_connectionSettings == null)
+                return ("unknown", 0, "Unknown", "(auto)");
+
+            var host = string.IsNullOrWhiteSpace(_connectionSettings.BrokerHost)
+                ? "unknown"
+                : _connectionSettings.BrokerHost;
+            var clientIdText = string.IsNullOrWhiteSpace(_connectionSettings.FixedClientId)
+                ? "(auto)"
+                : _connectionSettings.FixedClientId;
+
+            return (
+                host,
+                _connectionSettings.BrokerPort,
+                _connectionSettings.ClientIdPolicy.ToString(),
+                clientIdText);
+        }
+
         /// <summary>
         /// Registers a raw message handler for the specified topic.
         /// This method requires the client to be enabled.

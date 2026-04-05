@@ -270,6 +270,8 @@ namespace PullSub.Core
             _subscriptionGate.Dispose();
             _resubscribeGate.Dispose();
             _startStopGate.Dispose();
+            PullSubQueueHandlerDebugTracker.OnRuntimeDisposed(this);
+            PullSubContextDebugTracker.OnRuntimeDisposed(this);
         }
 
         private async Task DisconnectCoreAsync(CancellationToken cancellationToken, bool allowWhenDisposed = false)

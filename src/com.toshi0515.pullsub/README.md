@@ -367,6 +367,36 @@ while (!cts.IsCancellationRequested)
 - Type-safe via generic `SubscribeAsync<T>`
 - Duplicate topics in same context are prevented
 
+### Diagnostics (.NET)
+
+Use `GetDiagnostics()` to snapshot runtime/topic state without Unity Editor:
+
+```csharp
+using PullSub.Core;
+using System;
+
+var diagnostics = runtime.GetDiagnostics();
+var snapshot = diagnostics.GetSnapshot(maxTopics: 128);
+
+Console.WriteLine(
+    $"State={snapshot.State} Connected={snapshot.IsConnected} Topics={snapshot.Topics.Length}");
+
+foreach (var topic in snapshot.Topics)
+{
+    Console.WriteLine(
+        $"{topic.Topic} HasValue={topic.HasValue} Receive={topic.DataReceiveCount} Dropped={topic.QueueDroppedCount}");
+}
+
+// Optional helper
+runtime.LogSnapshot(Console.WriteLine, maxTopics: 128);
+```
+
+Notes:
+
+- Queue handler fault/active metrics may be unavailable outside Unity Editor. Check `snapshot.HasQueueHandlerDiagnostics`.
+- Snapshot polling is not free. For production, start with low frequency such as 1 Hz.
+- OpenTelemetry / HTTP endpoint integration is intentionally out of scope for this library. Build it on top of snapshot data.
+
 ---
 
 ## Lifecycle Management — Best Practices
@@ -516,6 +546,20 @@ If you bind lifetime with `AddTo(this)`, omit `cancellationToken: destroyCancell
 | **`StopHandlerAsync(topic)`** | Stop only one Queue handler | Data subscriptions and other handlers keep running |
 | **`DisposeAsync()`** | Need completion guarantee for cleanup | Waits until unsubscribe/stop finishes |
 | **`Dispose()`** | Fire-and-forget teardown is acceptable | Fast, non-blocking, fault-observed path |
+
+### Runtime Monitoring (Editor)
+
+Use the monitor window to inspect all `PullSubMqttClient` instances in open scenes:
+
+- Open: `Tools > PullSub > Debug Monitor`
+- Scope: one panel per `PullSubMqttClient` (`scene`, `host:port`, `client id policy`)
+- Topic state: Data / Queue kind, Data `HasValue` + latest timestamp age, Queue active/faulted handler counts, dropped message count
+- Transition hint: recently removed topics are shown for the last 10 seconds
+
+Notes:
+
+- The monitor focuses on operational state, not payload value contents.
+- Handler method names are intentionally not displayed.
 
 ---
 

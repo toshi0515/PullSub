@@ -10,6 +10,22 @@ namespace PullSub.Core
     /// </summary>
     internal sealed class TypedDataRegistry
     {
+        internal readonly struct TypedDataTopicDebugSnapshot
+        {
+            public TypedDataTopicDebugSnapshot(string topic, bool hasValue, DateTime timestampUtc, long receiveCount)
+            {
+                Topic = topic;
+                HasValue = hasValue;
+                TimestampUtc = timestampUtc;
+                ReceiveCount = receiveCount;
+            }
+
+            public string Topic { get; }
+            public bool HasValue { get; }
+            public DateTime TimestampUtc { get; }
+            public long ReceiveCount { get; }
+        }
+
         private abstract class TopicEntry
         {
             public Type ValueType { get; }
@@ -188,6 +204,28 @@ namespace PullSub.Core
                 _entries.Keys.CopyTo(result, 0);
                 return result;
             }
+        }
+
+        internal TypedDataTopicDebugSnapshot[] SnapshotTopicStates()
+        {
+            KeyValuePair<string, TopicEntry>[] entries;
+            lock (_gate)
+            {
+                entries = new KeyValuePair<string, TopicEntry>[_entries.Count];
+                var copyIndex = 0;
+                foreach (var pair in _entries)
+                    entries[copyIndex++] = pair;
+            }
+
+            var result = new TypedDataTopicDebugSnapshot[entries.Length];
+            for (var i = 0; i < entries.Length; i++)
+            {
+                var entry = entries[i];
+                entry.Value.Cache.TryGetDebugState(out var hasValue, out var timestampUtc, out var receiveCount);
+                result[i] = new TypedDataTopicDebugSnapshot(entry.Key, hasValue, timestampUtc, receiveCount);
+            }
+
+            return result;
         }
 
         /// <summary>全キャッシュの待機タスクをキャンセルし、登録を消去します。</summary>

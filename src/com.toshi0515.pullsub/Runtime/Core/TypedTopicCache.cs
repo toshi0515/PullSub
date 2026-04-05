@@ -11,6 +11,7 @@ namespace PullSub.Core
     {
         void Cancel();
         void Invalidate();
+        bool TryGetDebugState(out bool hasValue, out DateTime timestampUtc, out long receiveCount);
     }
 
     /// <summary>
@@ -23,6 +24,7 @@ namespace PullSub.Core
         private DateTime _latestTimestampUtc;
         private bool _hasValue;
         private bool _isActive = true;
+        private long _receiveCount;
         private TaskCompletionSource<T> _firstValueSignal;
 
         public void Update(T value, DateTime timestampUtc)
@@ -35,6 +37,7 @@ namespace PullSub.Core
 
                 _latest = value;
                 _latestTimestampUtc = timestampUtc;
+                _receiveCount++;
                 if (!_hasValue)
                 {
                     _hasValue = true;
@@ -111,7 +114,20 @@ namespace PullSub.Core
             signal?.TrySetCanceled();
         }
 
+        public bool TryGetDebugState(out bool hasValue, out DateTime timestampUtc, out long receiveCount)
+        {
+            lock (_gate)
+            {
+                hasValue = _isActive && _hasValue;
+                timestampUtc = hasValue ? _latestTimestampUtc : default;
+                receiveCount = _receiveCount;
+                return hasValue;
+            }
+        }
+
         void ITypedTopicCache.Cancel() => Cancel();
         void ITypedTopicCache.Invalidate() => Invalidate();
+        bool ITypedTopicCache.TryGetDebugState(out bool hasValue, out DateTime timestampUtc, out long receiveCount)
+            => TryGetDebugState(out hasValue, out timestampUtc, out receiveCount);
     }
 }

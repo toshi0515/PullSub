@@ -11,7 +11,9 @@ namespace PullSub.Core
             if (runtime == null)
                 throw new ArgumentNullException(nameof(runtime));
 
-            return new PullSubContext(runtime);
+            var context = new PullSubContext(runtime);
+            PullSubContextDebugTracker.Register(runtime, context);
+            return context;
         }
 
         public static async Task<PullSubSubscription<T>> SubscribeAsync<T>(
@@ -220,6 +222,7 @@ namespace PullSub.Core
                 throw;
             }
 
+            PullSubQueueHandlerDebugTracker.Register(runtime, topic, loopTask);
             return new PullSubQueueHandlerRegistration(topic, registrationCts, registrationLinkedCts, loopTask);
         }
 

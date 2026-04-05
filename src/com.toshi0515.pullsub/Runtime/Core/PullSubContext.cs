@@ -8,6 +8,30 @@ namespace PullSub.Core
 {
     public sealed class PullSubContext : IDisposable, IAsyncDisposable
     {
+        internal readonly struct ContextSubscriptionDebugSnapshot
+        {
+            public ContextSubscriptionDebugSnapshot(string topic, bool isQueue)
+            {
+                Topic = topic;
+                IsQueue = isQueue;
+            }
+
+            public string Topic { get; }
+            public bool IsQueue { get; }
+        }
+
+        internal readonly struct ContextDebugSnapshot
+        {
+            public ContextDebugSnapshot(string debugLabel, ContextSubscriptionDebugSnapshot[] subscriptions)
+            {
+                DebugLabel = debugLabel;
+                Subscriptions = subscriptions;
+            }
+
+            public string DebugLabel { get; }
+            public ContextSubscriptionDebugSnapshot[] Subscriptions { get; }
+        }
+
         private enum SubscriptionKind
         {
             Data = 0,
@@ -54,12 +78,38 @@ namespace PullSub.Core
         private readonly HashSet<SubscriptionKey> _inFlightTopics = new HashSet<SubscriptionKey>();
         private readonly Dictionary<SubscriptionKey, IPullSubSubscriptionLease> _activeSubscriptions
             = new Dictionary<SubscriptionKey, IPullSubSubscriptionLease>();
+        private string _debugLabel;
 
         private int _disposed;
 
         internal PullSubContext(PullSubRuntime runtime)
         {
             _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+        }
+
+        internal void SetDebugLabel(string label)
+        {
+            lock (_gate)
+            {
+                _debugLabel = string.IsNullOrWhiteSpace(label) ? null : label;
+            }
+        }
+
+        internal ContextDebugSnapshot GetDebugSnapshot()
+        {
+            lock (_gate)
+            {
+                var subscriptions = new ContextSubscriptionDebugSnapshot[_activeSubscriptions.Count];
+                var index = 0;
+                foreach (var pair in _activeSubscriptions)
+                {
+                    subscriptions[index++] = new ContextSubscriptionDebugSnapshot(
+                        pair.Key.Topic,
+                        pair.Key.Kind == SubscriptionKind.Queue);
+                }
+
+                return new ContextDebugSnapshot(_debugLabel, subscriptions);
+            }
         }
 
         public async Task<PullSubSubscription<T>> SubscribeAsync<T>(
@@ -261,6 +311,8 @@ namespace PullSub.Core
             if (Interlocked.Exchange(ref _disposed, 1) != 0)
                 return;
 
+            PullSubContextDebugTracker.Unregister(_runtime, this);
+
             IPullSubSubscriptionLease[] subscriptions;
             lock (_gate)
             {
@@ -282,6 +334,8 @@ namespace PullSub.Core
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0)
                 return;
+
+            PullSubContextDebugTracker.Unregister(_runtime, this);
 
             IPullSubSubscriptionLease[] subscriptions;
             lock (_gate)

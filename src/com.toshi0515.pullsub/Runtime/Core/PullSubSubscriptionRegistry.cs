@@ -5,6 +5,26 @@ namespace PullSub.Core
 {
     internal sealed class PullSubSubscriptionRegistry
     {
+        internal readonly struct TopicDebugSnapshot
+        {
+            public TopicDebugSnapshot(
+                string topic,
+                int dataSubCount,
+                int queueSubCount,
+                PullSubQualityOfServiceLevel subscribeQos)
+            {
+                Topic = topic;
+                DataSubCount = dataSubCount;
+                QueueSubCount = queueSubCount;
+                SubscribeQos = subscribeQos;
+            }
+
+            public string Topic { get; }
+            public int DataSubCount { get; }
+            public int QueueSubCount { get; }
+            public PullSubQualityOfServiceLevel SubscribeQos { get; }
+        }
+
         private sealed class TopicCounter
         {
             public int QueueSubCount;
@@ -118,6 +138,26 @@ namespace PullSub.Core
             {
                 var result = new string[_topics.Count];
                 _topics.Keys.CopyTo(result, 0);
+                return result;
+            }
+        }
+
+        internal TopicDebugSnapshot[] SnapshotTopicDetails()
+        {
+            lock (_gate)
+            {
+                var result = new TopicDebugSnapshot[_topics.Count];
+                var index = 0;
+                foreach (var pair in _topics)
+                {
+                    var counter = pair.Value;
+                    result[index++] = new TopicDebugSnapshot(
+                        pair.Key,
+                        counter.DataSubCount,
+                        counter.QueueSubCount,
+                        counter.SubscribeQos);
+                }
+
                 return result;
             }
         }
