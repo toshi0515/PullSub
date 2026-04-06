@@ -4,20 +4,19 @@ using System.Threading.Tasks;
 
 namespace PullSub.Core
 {
-    public interface ITransport
+    public interface ITransport : IAsyncDisposable
     {
-        bool IsStarted { get; }
         bool IsConnected { get; }
+        PullSubReconnectOptions ReconnectOptions { get; }
 
-        // イベントは MQTTnet 型に依存しないデリゲートで定義
-        Func<Task> OnConnected { get; set; }
-        Func<string, Task> OnDisconnected { get; set; } // reason string
-        // Borrowed payload memory is valid only during callback execution.
-        Func<string, ReadOnlyMemory<byte>, Task> OnMessageReceived { get; set; } // topic, payload
+        void SetCallbacks(
+            Func<Task> onConnected,
+            Func<string, Task> onDisconnected,
+            Func<string, ReadOnlyMemory<byte>, Task> onMessageReceived);
 
-        Task StartAsync(CancellationToken cancellationToken);
-        Task StopAsync(bool cleanDisconnect, CancellationToken cancellationToken);
-        Task EnqueueAsync(string topic, byte[] payload, PullSubQualityOfServiceLevel qos, bool retain);
+        Task ConnectAsync(CancellationToken cancellationToken);
+        Task DisconnectAsync(bool cleanDisconnect, CancellationToken cancellationToken);
+        Task PublishAsync(string topic, byte[] payload, PullSubQualityOfServiceLevel qos, bool retain, CancellationToken cancellationToken);
         Task SubscribeAsync(string topic, PullSubQualityOfServiceLevel qos, CancellationToken cancellationToken);
         Task UnsubscribeAsync(string topic, CancellationToken cancellationToken);
     }

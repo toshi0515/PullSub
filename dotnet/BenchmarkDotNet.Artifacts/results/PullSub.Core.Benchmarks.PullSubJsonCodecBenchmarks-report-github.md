@@ -8,9 +8,9 @@ Unknown processor
 
 
 ```
-| Method              | Mean       | Error    | StdDev  | Gen0   | Allocated |
-|-------------------- |-----------:|---------:|--------:|-------:|----------:|
-| JsonEncodeBytes     |   427.8 ns |  5.77 ns | 4.82 ns | 0.1240 |    1168 B |
-| FlatJsonEncodeBytes | 1,099.3 ns | 10.42 ns | 9.75 ns | 0.1183 |    1120 B |
-| JsonDecode          |   536.2 ns |  4.73 ns | 4.42 ns | 0.0048 |      48 B |
-| FlatJsonDecode      | 1,506.2 ns |  6.67 ns | 5.57 ns | 0.1240 |    1176 B |
+| Method              | Mean       | Error    | StdDev   | Gen0   | Allocated |
+|-------------------- |-----------:|---------:|---------:|-------:|----------:|
+| JsonEncodeBytes     |   460.3 ns |  6.11 ns |  5.42 ns | 0.1240 |    1168 B |
+| FlatJsonEncodeBytes | 1,115.9 ns |  9.79 ns |  7.64 ns | 0.1183 |    1120 B |
+| JsonDecode          |   533.3 ns |  6.10 ns |  5.09 ns | 0.0048 |      48 B |
+| FlatJsonDecode      | 1,504.8 ns | 29.71 ns | 27.79 ns | 0.1240 |    1176 B |

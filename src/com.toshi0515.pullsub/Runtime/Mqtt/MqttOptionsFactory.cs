@@ -3,13 +3,12 @@ using System.Security.Authentication;
 using System.Text;
 using MQTTnet;
 using MQTTnet.Client;
-using MQTTnet.Extensions.ManagedClient;
 
 namespace PullSub.Mqtt
 {
     internal static class MqttOptionsFactory
     {
-        public static ManagedMqttClientOptions Build(
+        public static MqttClientOptions Build(
             MqttClientProfile profile,
             MqttConnectionOptions connectionOptions,
             string clientId,
@@ -48,10 +47,7 @@ namespace PullSub.Mqtt
 
             clientOptionsBuilder = ApplyWillOptions(clientOptionsBuilder, connectionOptions.Will);
 
-            return new ManagedMqttClientOptionsBuilder()
-                .WithClientOptions(clientOptionsBuilder.Build())
-                .WithAutoReconnectDelay(TimeSpan.FromSeconds(connectionOptions.ReconnectDelaySeconds))
-                .Build();
+            return clientOptionsBuilder.Build();
         }
 
         private static MqttClientOptionsBuilder ApplyTransportOptions(

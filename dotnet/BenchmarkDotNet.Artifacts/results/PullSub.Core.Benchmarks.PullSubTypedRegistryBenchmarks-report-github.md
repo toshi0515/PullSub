@@ -8,8 +8,8 @@ Unknown processor
 
 
 ```
-| Method                  | Mean      | Error    | StdDev   | Gen0   | Allocated |
-|------------------------ |----------:|---------:|---------:|-------:|----------:|
-| RegistryTryGetCache     |  16.27 ns | 0.037 ns | 0.031 ns |      - |         - |
-| RegistryDecodeAndUpdate | 536.66 ns | 6.311 ns | 5.904 ns | 0.0048 |      48 B |
-| RegisterThenUnregister  |  78.67 ns | 0.699 ns | 0.654 ns | 0.0169 |     160 B |
+| Method                  | Mean      | Error     | StdDev    | Gen0   | Allocated |
+|------------------------ |----------:|----------:|----------:|-------:|----------:|
+| RegistryTryGetCache     |  16.40 ns |  0.291 ns |  0.272 ns |      - |         - |
+| RegistryDecodeAndUpdate | 556.12 ns | 10.818 ns | 15.514 ns | 0.0048 |      48 B |
+| RegisterThenUnregister  |  83.63 ns |  1.449 ns |  1.423 ns | 0.0178 |     168 B |

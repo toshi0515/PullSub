@@ -74,28 +74,46 @@ namespace PullSub.Core.Benchmarks
 
         private sealed class BenchmarkTransport : global::PullSub.Core.ITransport
         {
-            public Func<Task>? OnConnected { get; set; }
-            public Func<string, Task>? OnDisconnected { get; set; }
-            public Func<string, ReadOnlyMemory<byte>, Task>? OnMessageReceived { get; set; }
+            private Func<Task>? _onConnected;
+            private Func<string, Task>? _onDisconnected;
+            private Func<string, ReadOnlyMemory<byte>, Task>? _onMessageReceived;
+            private int _callbacksSet;
 
-            public bool IsStarted { get; private set; }
             public bool IsConnected { get; private set; }
+            public global::PullSub.Core.PullSubReconnectOptions ReconnectOptions { get; }
+                = global::PullSub.Core.PullSubReconnectOptions.Default;
 
-            public Task StartAsync(CancellationToken cancellationToken)
+            public void SetCallbacks(
+                Func<Task> onConnected,
+                Func<string, Task> onDisconnected,
+                Func<string, ReadOnlyMemory<byte>, Task> onMessageReceived)
             {
-                IsStarted = true;
-                IsConnected = true;
-                return OnConnected?.Invoke() ?? Task.CompletedTask;
+                if (Interlocked.Exchange(ref _callbacksSet, 1) == 1)
+                    throw new InvalidOperationException("Callbacks are already set.");
+
+                _onConnected = onConnected;
+                _onDisconnected = onDisconnected;
+                _onMessageReceived = onMessageReceived;
             }
 
-            public Task StopAsync(bool cleanDisconnect, CancellationToken cancellationToken)
+            public Task ConnectAsync(CancellationToken cancellationToken)
+            {
+                IsConnected = true;
+                return _onConnected?.Invoke() ?? Task.CompletedTask;
+            }
+
+            public Task DisconnectAsync(bool cleanDisconnect, CancellationToken cancellationToken)
             {
                 IsConnected = false;
-                IsStarted = false;
-                return OnDisconnected?.Invoke(cleanDisconnect ? "Clean" : "Force") ?? Task.CompletedTask;
+                return _onDisconnected?.Invoke(cleanDisconnect ? "Clean" : "Force") ?? Task.CompletedTask;
             }
 
-            public Task EnqueueAsync(string topic, byte[] payload, global::PullSub.Core.PullSubQualityOfServiceLevel qos, bool retain)
+            public Task PublishAsync(
+                string topic,
+                byte[] payload,
+                global::PullSub.Core.PullSubQualityOfServiceLevel qos,
+                bool retain,
+                CancellationToken cancellationToken)
             {
                 return Task.CompletedTask;
             }
@@ -112,7 +130,13 @@ namespace PullSub.Core.Benchmarks
 
             public void EmitMessage(string topic, byte[] payload)
             {
-                (OnMessageReceived?.Invoke(topic, payload) ?? Task.CompletedTask).GetAwaiter().GetResult();
+                (_onMessageReceived?.Invoke(topic, payload) ?? Task.CompletedTask).GetAwaiter().GetResult();
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                IsConnected = false;
+                return default;
             }
         }
     }

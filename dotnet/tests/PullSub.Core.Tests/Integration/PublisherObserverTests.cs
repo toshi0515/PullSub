@@ -18,7 +18,7 @@ namespace PullSub.Core.Tests.Integration
             await using var runtime = new PullSubRuntime(transport);
             var topic = PullSubTopic.Create<int>("test/publisher/order");
 
-            transport.OnEnqueue = async (topicName, payload, qos, retain) =>
+            transport.OnPublish = async (topicName, payload, qos, retain, _) =>
             {
                 DecodeOrThrow(topic, payload, out var value);
 
@@ -52,7 +52,7 @@ namespace PullSub.Core.Tests.Integration
             var releaseFirst = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var enqueueCount = 0;
 
-            transport.OnEnqueue = async (topicName, payload, qos, retain) =>
+            transport.OnPublish = async (topicName, payload, qos, retain, _) =>
             {
                 var index = Interlocked.Increment(ref enqueueCount);
                 if (index == 1)
@@ -91,7 +91,7 @@ namespace PullSub.Core.Tests.Integration
             var topic = PullSubTopic.Create<int>("test/publisher/error");
             var errors = new List<Exception>();
 
-            transport.OnEnqueue = (_, _, _, _) => throw new InvalidOperationException("publish failed");
+            transport.OnPublish = (_, _, _, _, _) => throw new InvalidOperationException("publish failed");
 
             await runtime.StartAsync();
             var observer = runtime.ToPublisher(topic, onError: ex => errors.Add(ex));
@@ -119,7 +119,7 @@ namespace PullSub.Core.Tests.Integration
                 logException: ex => loggedErrors.Add(ex));
 
             var topic = PullSubTopic.Create<int>("test/publisher/error/logging");
-            transport.OnEnqueue = (_, _, _, _) => throw new InvalidOperationException("publish failed");
+            transport.OnPublish = (_, _, _, _, _) => throw new InvalidOperationException("publish failed");
 
             await runtime.StartAsync();
             var observer = runtime.ToPublisher(topic);
@@ -143,7 +143,7 @@ namespace PullSub.Core.Tests.Integration
                 logException: ex => loggedErrors.Add(ex));
 
             var topic = PullSubTopic.Create<int>("test/publisher/error/callback-throws");
-            transport.OnEnqueue = (_, _, _, _) => throw new InvalidOperationException("publish failed");
+            transport.OnPublish = (_, _, _, _, _) => throw new InvalidOperationException("publish failed");
 
             await runtime.StartAsync();
             var observer = runtime.ToPublisher(

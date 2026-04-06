@@ -9,8 +9,7 @@
     "allowUnsafeCode": false,
     "overrideReferences": true,
     "precompiledReferences": [
-        "MQTTnet.dll",
-        "MQTTnet.Extensions.ManagedClient.dll"
+        "MQTTnet.dll"
     ],
     "autoReferenced": true,
     "defineConstraints": [],

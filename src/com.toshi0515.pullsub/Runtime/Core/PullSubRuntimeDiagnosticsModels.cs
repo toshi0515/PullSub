@@ -2,6 +2,26 @@ using System;
 
 namespace PullSub.Core
 {
+    public readonly struct PullSubReconnectDiagnostics
+    {
+        public PullSubReconnectDiagnostics(
+            int attemptCount,
+            TimeSpan currentDelay,
+            DateTime nextRetryAtUtc,
+            string lastFailureReason)
+        {
+            AttemptCount = attemptCount;
+            CurrentDelay = currentDelay;
+            NextRetryAtUtc = nextRetryAtUtc;
+            LastFailureReason = lastFailureReason ?? string.Empty;
+        }
+
+        public int AttemptCount { get; }
+        public TimeSpan CurrentDelay { get; }
+        public DateTime NextRetryAtUtc { get; }
+        public string LastFailureReason { get; }
+    }
+
     public readonly struct PullSubTopicDiagnostics
     {
         public PullSubTopicDiagnostics(
@@ -52,6 +72,7 @@ namespace PullSub.Core
             bool isReady,
             DateTime capturedAtUtc,
             bool hasQueueHandlerDiagnostics,
+            PullSubReconnectDiagnostics reconnect,
             PullSubTopicDiagnostics[] topics)
         {
             State = state;
@@ -60,6 +81,7 @@ namespace PullSub.Core
             IsReady = isReady;
             CapturedAtUtc = capturedAtUtc;
             HasQueueHandlerDiagnostics = hasQueueHandlerDiagnostics;
+            Reconnect = reconnect;
             Topics = topics ?? Array.Empty<PullSubTopicDiagnostics>();
         }
 
@@ -69,6 +91,7 @@ namespace PullSub.Core
         public bool IsReady { get; }
         public DateTime CapturedAtUtc { get; }
         public bool HasQueueHandlerDiagnostics { get; }
+        public PullSubReconnectDiagnostics Reconnect { get; }
         public PullSubTopicDiagnostics[] Topics { get; }
     }
 }

@@ -2,23 +2,24 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using MQTTnet;
-using MQTTnet.Extensions.ManagedClient;
+using MQTTnet.Client;
 using PullSub.Core;
 
 namespace PullSub.Mqtt
 {
-    public sealed class MqttTransport : ITransport, IAsyncDisposable
+    public sealed class MqttTransport : ITransport
     {
-        private readonly IManagedMqttClient _client;
+        private readonly IMqttClient _client;
         private readonly MqttClientProfile _profile;
         private readonly MqttConnectionOptions _connectionOptions;
+        private int _callbacksSet;
 
-        public Func<Task> OnConnected { get; set; }
-        public Func<string, Task> OnDisconnected { get; set; }
-        public Func<string, ReadOnlyMemory<byte>, Task> OnMessageReceived { get; set; }
+        private Func<Task> _onConnected = () => Task.CompletedTask;
+        private Func<string, Task> _onDisconnected = _ => Task.CompletedTask;
+        private Func<string, ReadOnlyMemory<byte>, Task> _onMessageReceived = (_, __) => Task.CompletedTask;
 
-        public bool IsStarted => _client.IsStarted;
         public bool IsConnected => _client.IsConnected;
+        public PullSubReconnectOptions ReconnectOptions => _connectionOptions.ReconnectOptions;
 
         public MqttTransport(
             string brokerHost,
@@ -45,14 +46,14 @@ namespace PullSub.Mqtt
             _connectionOptions = connectionOptions ?? throw new ArgumentNullException(nameof(connectionOptions));
 
             var factory = new MqttFactory();
-            _client = factory.CreateManagedMqttClient();
+            _client = factory.CreateMqttClient();
 
             // MQTTnet の args 型はここで吸収し、interface のデリゲートに変換する
             _client.ConnectedAsync += _ =>
-                OnConnected?.Invoke() ?? Task.CompletedTask;
+                _onConnected();
 
             _client.DisconnectedAsync += e =>
-                OnDisconnected?.Invoke(e.Reason.ToString()) ?? Task.CompletedTask;
+                _onDisconnected(e.Reason.ToString());
 
             _client.ApplicationMessageReceivedAsync += e =>
             {
@@ -61,13 +62,36 @@ namespace PullSub.Mqtt
                     return Task.CompletedTask;
 
                 var payload = GetPayloadMemory(msg.PayloadSegment);
-                return OnMessageReceived?.Invoke(msg.Topic, payload) ?? Task.CompletedTask;
+                return _onMessageReceived(msg.Topic, payload);
             };
         }
+
+        public void SetCallbacks(
+            Func<Task> onConnected,
+            Func<string, Task> onDisconnected,
+            Func<string, ReadOnlyMemory<byte>, Task> onMessageReceived)
+        {
+            if (onConnected == null)
+                throw new ArgumentNullException(nameof(onConnected));
+
+            if (onDisconnected == null)
+                throw new ArgumentNullException(nameof(onDisconnected));
+
+            if (onMessageReceived == null)
+                throw new ArgumentNullException(nameof(onMessageReceived));
+
+            if (Interlocked.Exchange(ref _callbacksSet, 1) == 1)
+                throw new InvalidOperationException("Transport callbacks are already set.");
+
+            _onConnected = onConnected;
+            _onDisconnected = onDisconnected;
+            _onMessageReceived = onMessageReceived;
+        }
+
         internal static MQTTnet.Protocol.MqttQualityOfServiceLevel ToMqttNet(PullSubQualityOfServiceLevel qos)
             => (MQTTnet.Protocol.MqttQualityOfServiceLevel)(int)qos;
 
-        public async Task StartAsync(CancellationToken cancellationToken)
+        public async Task ConnectAsync(CancellationToken cancellationToken)
         {
             var clientId = _profile.ClientIdPolicy == MqttClientIdPolicy.Fixed
                 ? _profile.FixedClientId
@@ -78,18 +102,27 @@ namespace PullSub.Mqtt
                 _connectionOptions,
                 clientId);
 
-            await PullSubAsyncUtils.AwaitWithCancellation(_client.StartAsync(options), cancellationToken);
+            await _client.ConnectAsync(options, cancellationToken).ConfigureAwait(false);
         }
 
-        public Task StopAsync(bool cleanDisconnect, CancellationToken cancellationToken)
+        public async Task DisconnectAsync(bool cleanDisconnect, CancellationToken cancellationToken)
         {
-            return PullSubAsyncUtils.AwaitWithCancellation(
-                _client.StopAsync(cleanDisconnect),
-                cancellationToken);
+            if (!_client.IsConnected)
+                return;
+
+            await _client.DisconnectAsync(new MqttClientDisconnectOptions(), cancellationToken).ConfigureAwait(false);
         }
 
-        public Task EnqueueAsync(string topic, byte[] payload, PullSubQualityOfServiceLevel qos, bool retain)
+        public Task PublishAsync(
+            string topic,
+            byte[] payload,
+            PullSubQualityOfServiceLevel qos,
+            bool retain,
+            CancellationToken cancellationToken)
         {
+            if (!_client.IsConnected)
+                throw new InvalidOperationException("Transport is not connected.");
+
             var message = new MqttApplicationMessageBuilder()
                 .WithTopic(topic)
                 .WithPayload(payload)
@@ -97,34 +130,29 @@ namespace PullSub.Mqtt
                 .WithRetainFlag(retain)
                 .Build();
 
-            return _client.EnqueueAsync(message);
+            return _client.PublishAsync(message, cancellationToken);
         }
 
         public Task SubscribeAsync(string topic, PullSubQualityOfServiceLevel qos, CancellationToken cancellationToken)
         {
-            var filter = new MqttTopicFilterBuilder()
-                .WithTopic(topic)
-                .WithQualityOfServiceLevel(ToMqttNet(qos))
-                .Build();
+            if (!_client.IsConnected)
+                throw new InvalidOperationException("Transport is not connected.");
 
-            return PullSubAsyncUtils.AwaitWithCancellation(
-                _client.SubscribeAsync(new[] { filter }),
-                cancellationToken);
+            return _client.SubscribeAsync(topic, ToMqttNet(qos), cancellationToken);
         }
 
         public Task UnsubscribeAsync(string topic, CancellationToken cancellationToken)
         {
-            return PullSubAsyncUtils.AwaitWithCancellation(
-                _client.UnsubscribeAsync(new[] { topic }),
-                cancellationToken);
+            if (!_client.IsConnected)
+                throw new InvalidOperationException("Transport is not connected.");
+
+            return _client.UnsubscribeAsync(topic, cancellationToken);
         }
 
-        public async ValueTask DisposeAsync()
+        public ValueTask DisposeAsync()
         {
-            if (_client is IAsyncDisposable asyncDisposable)
-                await asyncDisposable.DisposeAsync();
-            else
-                (_client as IDisposable)?.Dispose();
+            (_client as IDisposable)?.Dispose();
+            return default;
         }
 
         private static ReadOnlyMemory<byte> GetPayloadMemory(ArraySegment<byte> payload)

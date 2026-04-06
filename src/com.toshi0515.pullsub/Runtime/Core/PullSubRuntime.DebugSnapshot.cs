@@ -53,6 +53,10 @@ namespace PullSub.Core
             bool isReady,
             DateTime capturedAtUtc,
             bool hasQueueHandlerDiagnostics,
+            int reconnectAttemptCount,
+            TimeSpan reconnectCurrentDelay,
+            DateTime reconnectNextRetryAtUtc,
+            string reconnectLastFailureReason,
             PullSubRuntimeTopicDebugSnapshot[] topics)
         {
             State = state;
@@ -61,6 +65,10 @@ namespace PullSub.Core
             IsReady = isReady;
             CapturedAtUtc = capturedAtUtc;
             HasQueueHandlerDiagnostics = hasQueueHandlerDiagnostics;
+            ReconnectAttemptCount = reconnectAttemptCount;
+            ReconnectCurrentDelay = reconnectCurrentDelay;
+            ReconnectNextRetryAtUtc = reconnectNextRetryAtUtc;
+            ReconnectLastFailureReason = reconnectLastFailureReason;
             Topics = topics;
         }
 
@@ -70,6 +78,10 @@ namespace PullSub.Core
         public bool IsReady { get; }
         public DateTime CapturedAtUtc { get; }
         public bool HasQueueHandlerDiagnostics { get; }
+        public int ReconnectAttemptCount { get; }
+        public TimeSpan ReconnectCurrentDelay { get; }
+        public DateTime ReconnectNextRetryAtUtc { get; }
+        public string ReconnectLastFailureReason { get; }
         public PullSubRuntimeTopicDebugSnapshot[] Topics { get; }
     }
 
@@ -122,13 +134,28 @@ namespace PullSub.Core
                     queueHandlerState.LastFaultUtc);
             }
 
+            var state = State;
+            var isStarted = state != PullSubState.NotStarted
+                && state != PullSubState.Stopped
+                && state != PullSubState.Disposed;
+
+            GetReconnectStateSnapshot(
+                out var reconnectAttemptCount,
+                out var reconnectCurrentDelay,
+                out var reconnectNextRetryAtUtc,
+                out var reconnectLastFailureReason);
+
             return new PullSubRuntimeDebugSnapshot(
-                State,
-                _transport.IsStarted,
+                state,
+                isStarted,
                 _transport.IsConnected,
                 IsReady,
                 DateTime.UtcNow,
                 PullSubQueueHandlerDebugTracker.IsTrackingEnabled,
+                reconnectAttemptCount,
+                reconnectCurrentDelay,
+                reconnectNextRetryAtUtc,
+                reconnectLastFailureReason,
                 topics);
         }
     }

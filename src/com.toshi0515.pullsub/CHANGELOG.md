@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+- Replaced MQTTnet Managed Client usage with plain `IMqttClient`-based transport implementation.
+- Moved reconnect orchestration to runtime with exponential backoff + jitter and reconnect diagnostics.
+- Updated Unity bridge connection settings to configure reconnect options explicitly (initial delay / max delay / multiplier / jitter).
+
 ## [1.0.0] - 2026-xx-xx
 
 ### Added

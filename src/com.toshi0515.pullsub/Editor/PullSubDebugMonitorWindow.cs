@@ -466,11 +466,33 @@ namespace PullSub.Editor
                 var snapshot = view.Snapshot;
                 var status = snapshot.IsConnected ? "Connected" : "Disconnected";
                 EditorGUILayout.LabelField($"State: {snapshot.State} | {status} | Ready: {(snapshot.IsReady ? "Yes" : "No")}");
+                DrawReconnectSection(snapshot);
 
                 DrawTopicTable(client.GetInstanceID(), snapshot.CapturedAtUtc, view.Topics);
                 DrawRemovedTopicSection(client.GetInstanceID());
                 DrawContextSection(client.GetInstanceID(), snapshot.CapturedAtUtc, view.Topics, view.Contexts);
             }
+        }
+
+        private static void DrawReconnectSection(PullSubRuntimeDebugSnapshot snapshot)
+        {
+            var nextRetryInMs = snapshot.ReconnectNextRetryAtUtc == default
+                ? 0
+                : Math.Max(0, (snapshot.ReconnectNextRetryAtUtc - snapshot.CapturedAtUtc).TotalMilliseconds);
+
+            var reason = string.IsNullOrWhiteSpace(snapshot.ReconnectLastFailureReason)
+                ? "-"
+                : snapshot.ReconnectLastFailureReason;
+
+            var line =
+                $"Reconnect: Attempts={snapshot.ReconnectAttemptCount}, CurrentDelay={snapshot.ReconnectCurrentDelay.TotalMilliseconds:F0}ms, NextRetryIn={nextRetryInMs:F0}ms";
+
+            if (snapshot.State == PullSubState.Reconnecting || snapshot.State == PullSubState.Disconnected)
+                DrawWarningLabel(line);
+            else
+                EditorGUILayout.LabelField(line);
+
+            EditorGUILayout.LabelField($"  LastFailure: {reason}");
         }
 
         private void DrawTopicTable(int clientId, DateTime capturedAtUtc, PullSubRuntimeTopicDebugSnapshot[] topics)

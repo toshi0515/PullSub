@@ -3,7 +3,7 @@
 ![.NET Standard 2.1](https://img.shields.io/badge/.NET-Standard%202.1-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Pull-style typed Pub/Sub runtime for Unity and .NET. Supports MQTTnet v4.3.x and MQTTnet.Extensions.ManagedClient v4.3.x.
+Pull-style typed Pub/Sub runtime for Unity and .NET. Supports MQTTnet v4.3.x.
 
 - For real-time IoT sensor messaging: Get the latest IoT sensor data efficiently — best for digital twin, robotics, smart home, etc.
 - Easy and type-safe access from the Unity main thread while transport/serialization layers run in other threads
@@ -151,7 +151,6 @@ Installing DLLs via [NuGet for Unity](https://github.com/GlitchEnzo/NuGetForUnit
 
 **Mqtt**
 - `MQTTnet.dll` (4.3.x)
-- `MQTTnet.Extensions.ManagedClient.dll` (4.3.x)
 
 ### Unity (UPM)
 

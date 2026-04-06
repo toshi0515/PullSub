@@ -12,9 +12,6 @@ namespace PullSub.Core
 
             _log("[PullSubRuntime] Connected.");
 
-            if (_suppressConnectedResubscribe)
-                return;
-
             try
             {
                 if (IsDisposeRequested)
@@ -36,6 +33,9 @@ namespace PullSub.Core
         {
             if (IsDisposeRequested)
                 return Task.CompletedTask;
+
+            SignalDisconnected();
+            ClearNetworkSubscriptionCache();
 
             if (State == PullSubState.Stopped || State == PullSubState.Disposed)
                 return Task.CompletedTask;

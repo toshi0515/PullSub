@@ -121,6 +121,45 @@ namespace PullSub.Bridge
     }
 
     [Serializable]
+    public sealed class PullSubClientReconnectSettings
+    {
+        [Tooltip("Initial reconnect delay in seconds after disconnect. Allowed range: 1-3600.")]
+        [SerializeField] private int _initialDelaySeconds = 1;
+
+        [Tooltip("Maximum reconnect delay in seconds. Allowed range: 1-3600.")]
+        [SerializeField] private int _maxDelaySeconds = 60;
+
+        [Tooltip("Backoff multiplier applied after each failed reconnect attempt. Must be >= 1.0.")]
+        [SerializeField] private float _backoffMultiplier = 2.0f;
+
+        [Tooltip("Random jitter factor (0.0-1.0) applied to reconnect delays to avoid thundering herd.")]
+        [SerializeField] [Range(0f, 1f)] private float _jitterFactor = 0.2f;
+
+        public PullSubReconnectOptions ToCoreOptions()
+        {
+            var initialSeconds = Math.Max(1, _initialDelaySeconds);
+            var maxSeconds = Math.Max(initialSeconds, _maxDelaySeconds);
+            var backoffMultiplier = Math.Max(1f, _backoffMultiplier);
+            var jitterFactor = Math.Clamp(_jitterFactor, 0f, 1f);
+
+            return new PullSubReconnectOptions(
+                initialDelay: TimeSpan.FromSeconds(initialSeconds),
+                maxDelay: TimeSpan.FromSeconds(maxSeconds),
+                multiplier: backoffMultiplier,
+                jitterFactor: jitterFactor);
+        }
+
+        internal void LoadLegacyInitialDelaySeconds(int seconds)
+        {
+            var normalized = Math.Max(1, seconds);
+            _initialDelaySeconds = normalized;
+
+            if (_maxDelaySeconds < normalized)
+                _maxDelaySeconds = normalized;
+        }
+    }
+
+    [Serializable]
     public sealed class PullSubClientConnectionSettings
     {
         [Header("Broker")]
@@ -134,9 +173,10 @@ namespace PullSub.Bridge
         [SerializeField] private string _fixedClientId = "";
 
         [Header("Connection")]
-        [Tooltip("Delay before auto reconnect after disconnect (seconds). Keep this lower than Keep Alive for faster recovery.")]
-        [SerializeField] private int _reconnectDelaySeconds = 5;
         [SerializeField] private bool _useCleanSession = true;
+
+        [Header("Reconnect")]
+        [SerializeField] private PullSubClientReconnectSettings _reconnectSettings = new PullSubClientReconnectSettings();
 
         [Header("Transport")]
         [SerializeField] private PullSubClientTransportSettings _transportSettings = new PullSubClientTransportSettings();
@@ -150,6 +190,10 @@ namespace PullSub.Bridge
         [FormerlySerializedAs("_keepAliveSeconds")]
         [SerializeField] [HideInInspector] private int _legacyKeepAliveSeconds = MqttKeepAliveOptions.DefaultSeconds;
         [SerializeField] [HideInInspector] private bool _legacyKeepAliveMigrated;
+
+        [FormerlySerializedAs("_reconnectDelaySeconds")]
+        [SerializeField] [HideInInspector] private int _legacyReconnectDelaySeconds = 5;
+        [SerializeField] [HideInInspector] private bool _legacyReconnectMigrated;
 
         [Header("TLS")]
         [SerializeField] private PullSubClientTlsSettings _tlsSettings = new PullSubClientTlsSettings();
@@ -181,10 +225,14 @@ namespace PullSub.Bridge
                 ? _transportSettings.ToCoreOptions()
                 : MqttTransportOptions.TcpDefault;
 
+            var reconnectOptions = _reconnectSettings != null
+                ? _reconnectSettings.ToCoreOptions()
+                : PullSubReconnectOptions.FromInitialDelaySeconds(Math.Max(1, _legacyReconnectDelaySeconds));
+
             return new MqttConnectionOptions(
                 credentials: credentials,
                 keepAlive: keepAliveOptions,
-                reconnectDelaySeconds: _reconnectDelaySeconds,
+                reconnectOptions: reconnectOptions,
                 useCleanSession: _useCleanSession,
                 tls: tlsOptions,
                 will: willOptions,
@@ -205,6 +253,14 @@ namespace PullSub.Bridge
             }
 
             _legacyKeepAliveMigrated = true;
+
+            EnsureReconnectSettings();
+
+            if (_legacyReconnectMigrated)
+                return;
+
+            _reconnectSettings.LoadLegacyInitialDelaySeconds(_legacyReconnectDelaySeconds);
+            _legacyReconnectMigrated = true;
         }
 
         internal void LoadLegacy(
@@ -227,6 +283,12 @@ namespace PullSub.Bridge
         {
             if (_keepAliveSettings == null)
                 _keepAliveSettings = new PullSubClientKeepAliveSettings();
+        }
+
+        private void EnsureReconnectSettings()
+        {
+            if (_reconnectSettings == null)
+                _reconnectSettings = new PullSubClientReconnectSettings();
         }
     }
 }

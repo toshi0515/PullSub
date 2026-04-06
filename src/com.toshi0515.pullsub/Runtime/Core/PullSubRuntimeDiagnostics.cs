@@ -51,6 +51,11 @@ namespace PullSub.Core
                 isReady: snapshot.IsReady,
                 capturedAtUtc: snapshot.CapturedAtUtc,
                 hasQueueHandlerDiagnostics: snapshot.HasQueueHandlerDiagnostics,
+                reconnect: new PullSubReconnectDiagnostics(
+                    attemptCount: snapshot.ReconnectAttemptCount,
+                    currentDelay: snapshot.ReconnectCurrentDelay,
+                    nextRetryAtUtc: snapshot.ReconnectNextRetryAtUtc,
+                    lastFailureReason: snapshot.ReconnectLastFailureReason),
                 topics: topics);
         }
     }

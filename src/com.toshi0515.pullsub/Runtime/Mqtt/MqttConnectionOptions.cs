@@ -380,7 +380,7 @@ namespace PullSub.Mqtt
             : this(
                 credentials,
                 new MqttKeepAliveOptions(enabled: true, seconds: keepAliveSeconds),
-                reconnectDelaySeconds,
+                PullSubReconnectOptions.FromInitialDelaySeconds(reconnectDelaySeconds),
                 useCleanSession,
                 tls,
                 will,
@@ -396,13 +396,29 @@ namespace PullSub.Mqtt
             MqttTlsOptions tls = null,
             MqttWillOptions will = null,
             MqttTransportOptions transport = null)
+            : this(
+                credentials,
+                keepAlive,
+                PullSubReconnectOptions.FromInitialDelaySeconds(reconnectDelaySeconds),
+                useCleanSession,
+                tls,
+                will,
+                transport)
         {
-            if (reconnectDelaySeconds < 1)
-                throw new ArgumentOutOfRangeException(nameof(reconnectDelaySeconds), "reconnectDelaySeconds must be greater than 0.");
+        }
 
+        public MqttConnectionOptions(
+            MqttCredentials credentials,
+            MqttKeepAliveOptions keepAlive,
+            PullSubReconnectOptions reconnectOptions,
+            bool useCleanSession = true,
+            MqttTlsOptions tls = null,
+            MqttWillOptions will = null,
+            MqttTransportOptions transport = null)
+        {
             Credentials = credentials ?? MqttCredentials.Anonymous;
             KeepAlive = keepAlive ?? MqttKeepAliveOptions.Default;
-            ReconnectDelaySeconds = reconnectDelaySeconds;
+            ReconnectOptions = reconnectOptions ?? PullSubReconnectOptions.Default;
             UseCleanSession = useCleanSession;
             Tls = tls ?? MqttTlsOptions.Disabled;
             Will = will ?? MqttWillOptions.Disabled;
@@ -412,7 +428,8 @@ namespace PullSub.Mqtt
         public MqttCredentials Credentials { get; }
         public MqttKeepAliveOptions KeepAlive { get; }
         public int KeepAliveSeconds => KeepAlive.Enabled ? KeepAlive.Seconds : 0;
-        public int ReconnectDelaySeconds { get; }
+        public PullSubReconnectOptions ReconnectOptions { get; }
+        public int ReconnectDelaySeconds => Math.Max(1, (int)Math.Round(ReconnectOptions.InitialDelay.TotalSeconds));
         public bool UseCleanSession { get; }
         public MqttTlsOptions Tls { get; }
         public MqttWillOptions Will { get; }
@@ -428,7 +445,7 @@ namespace PullSub.Mqtt
 
             return Equals(Credentials, other.Credentials)
                 && Equals(KeepAlive, other.KeepAlive)
-                && ReconnectDelaySeconds == other.ReconnectDelaySeconds
+                && Equals(ReconnectOptions, other.ReconnectOptions)
                 && UseCleanSession == other.UseCleanSession
                 && Equals(Tls, other.Tls)
                 && Equals(Will, other.Will)
@@ -443,7 +460,7 @@ namespace PullSub.Mqtt
             {
                 var hashCode = Credentials != null ? Credentials.GetHashCode() : 0;
                 hashCode = (hashCode * 397) ^ (KeepAlive != null ? KeepAlive.GetHashCode() : 0);
-                hashCode = (hashCode * 397) ^ ReconnectDelaySeconds;
+                hashCode = (hashCode * 397) ^ (ReconnectOptions != null ? ReconnectOptions.GetHashCode() : 0);
                 hashCode = (hashCode * 397) ^ UseCleanSession.GetHashCode();
                 hashCode = (hashCode * 397) ^ (Tls != null ? Tls.GetHashCode() : 0);
                 hashCode = (hashCode * 397) ^ (Will != null ? Will.GetHashCode() : 0);

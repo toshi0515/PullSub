@@ -7,7 +7,7 @@ namespace PullSub.Core
 {
     public sealed partial class PullSubRuntime
     {
-        public Task PublishRawAsync(
+        public async Task PublishRawAsync(
             string topic,
             byte[] payload,
             PullSubQualityOfServiceLevel qos = 0,
@@ -22,10 +22,18 @@ namespace PullSub.Core
 
             EnsureStarted();
 
-            return PullSubAsyncUtils.AwaitWithCancellation(
-                _transport.EnqueueAsync(topic, payload, qos, retain),
-                cancellationToken,
-                _disposeCts.Token);
+            if (!_transport.IsConnected)
+                throw new InvalidOperationException("Transport is not connected.");
+
+            var operationToken = CreateOperationToken(cancellationToken, out var linkedCts);
+            try
+            {
+                await _transport.PublishAsync(topic, payload, qos, retain, operationToken);
+            }
+            finally
+            {
+                linkedCts?.Dispose();
+            }
         }
 
         public Task PublishDataAsync<T>(
@@ -99,7 +107,7 @@ namespace PullSub.Core
                     throw;
                 }
 
-                if (shouldNetworkSubscribe && _transport.IsConnected)
+                if (shouldNetworkSubscribe && _transport.IsConnected && !IsNetworkSubscribedTopic(topic))
                 {
                     try
                     {
@@ -161,7 +169,7 @@ namespace PullSub.Core
                     throw;
                 }
 
-                if (networkRegistered && _transport.IsConnected)
+                if (networkRegistered && _transport.IsConnected && !IsNetworkSubscribedTopic(topic))
                 {
                     try
                     {
@@ -210,7 +218,7 @@ namespace PullSub.Core
                 if (!_subscriptions.IsQueueSubRegistered(topic))
                     _rawInbox.RemoveTopic(topic);
 
-                if (shouldNetworkUnsubscribe && _transport.IsConnected)
+                if (shouldNetworkUnsubscribe && _transport.IsConnected && IsNetworkSubscribedTopic(topic))
                 {
                     await UnsubscribeNetworkAsync(topic, operationToken);
                 }
@@ -242,7 +250,7 @@ namespace PullSub.Core
             var shouldNetworkUnsubscribe = _subscriptions.UnregisterDataSub(topic);
             try
             {
-                if (shouldNetworkUnsubscribe && _transport.IsConnected)
+                if (shouldNetworkUnsubscribe && _transport.IsConnected && IsNetworkSubscribedTopic(topic))
                 {
                     await UnsubscribeNetworkAsync(topic, operationToken);
                 }

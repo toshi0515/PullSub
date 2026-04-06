@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -18,15 +19,24 @@ namespace PullSub.Core
 
         private readonly PullSubMessageDispatcher _messageDispatcher;
         private readonly PullSubShutdownCoordinator _shutdownCoordinator;
+        private readonly HashSet<string> _networkSubscribedTopics = new HashSet<string>(StringComparer.Ordinal);
 
         private readonly Action<string> _log;
         private readonly Action<string> _logWarning;
         private readonly Action<string> _logError;
         private readonly Action<Exception> _logException;
         private TaskCompletionSource<bool> _readySignal = CreateReadySignal();
+        private TaskCompletionSource<bool> _disconnectSignal = CreateDisconnectedSignal();
+        private readonly Random _reconnectJitterRandom = new Random();
+
+        private CancellationTokenSource _connectionLoopCts;
+        private Task _connectionLoopTask;
 
         private int _disposeGuard;
-        private volatile bool _suppressConnectedResubscribe;
+        private int _reconnectAttemptCount;
+        private TimeSpan _reconnectCurrentDelay = PullSubReconnectOptions.Default.InitialDelay;
+        private DateTime _reconnectNextRetryAtUtc;
+        private string _reconnectLastFailureReason = string.Empty;
         private PullSubState _state = PullSubState.NotStarted;
 
         public PullSubRuntime(
@@ -49,9 +59,10 @@ namespace PullSub.Core
                 _logError,
                 _logException);
 
-            _transport.OnConnected = HandleConnectedAsync;
-            _transport.OnDisconnected = HandleDisconnectedAsync;
-            _transport.OnMessageReceived = HandleMessageReceivedAsync;
+            _transport.SetCallbacks(
+                HandleConnectedAsync,
+                HandleDisconnectedAsync,
+                HandleMessageReceivedAsync);
         }
 
         public PullSubState State
@@ -76,8 +87,6 @@ namespace PullSub.Core
         {
             ThrowIfDisposed();
             var operationToken = CreateOperationToken(cancellationToken, out var linkedCts);
-            var reuseStartedClient = false;
-            var reuseConnectedClient = false;
             try
             {
                 await _startStopGate.WaitAsync(operationToken);
@@ -90,51 +99,27 @@ namespace PullSub.Core
 
             try
             {
+                var shouldStartLoop = false;
                 lock (_stateGate)
                 {
-                    if (_state == PullSubState.Starting)
+                    if (IsStartedStateNoLock() && IsConnectionLoopRunningNoLock())
+                    {
                         return;
+                    }
 
-                    if (_transport.IsStarted)
-                    {
-                        reuseStartedClient = true;
-                        reuseConnectedClient = _transport.IsConnected;
-                    }
-                    else
-                    {
-                        _state = PullSubState.Starting;
-                    }
+                    _state = PullSubState.Starting;
+                    if (_readySignal.Task.IsCompleted)
+                        _readySignal = CreateReadySignal();
+
+                    InitializeReconnectStateNoLock(_transport.ReconnectOptions);
+                    ClearNetworkSubscriptionCacheNoLock();
+                    shouldStartLoop = true;
                 }
 
-                if (reuseStartedClient)
+                if (shouldStartLoop)
                 {
-                    if (reuseConnectedClient)
-                    {
-                        await ResubscribeAllTopicsAsync(operationToken);
-                        SetState(PullSubState.Ready);
-                    }
-                    else
-                    {
-                        // StartAsync contract is "managed client started" (not "already connected").
-                        // If the client is already started but transport is reconnecting, returning is expected.
-                        SetState(PullSubState.Reconnecting);
-                    }
-
-                    return;
-                }
-
-                _suppressConnectedResubscribe = true;
-                try
-                {
-                    _log($"[PullSubRuntime] Starting.");
-
-                    await _transport.StartAsync(operationToken);
-                    await ResubscribeAllTopicsAsync(operationToken);
-                    SetState(PullSubState.Ready);
-                }
-                finally
-                {
-                    _suppressConnectedResubscribe = false;
+                    _log("[PullSubRuntime] Starting.");
+                    StartConnectionLoop();
                 }
             }
             catch
@@ -238,10 +223,7 @@ namespace PullSub.Core
 
             SetState(PullSubState.Disposed);
 
-            if (_transport is IAsyncDisposable asyncTransport)
-                await asyncTransport.DisposeAsync();
-            else
-                (_transport as IDisposable)?.Dispose();
+            await _transport.DisposeAsync();
 
             _disposeCts.Dispose();
             _subscriptionGate.Dispose();
@@ -256,7 +238,7 @@ namespace PullSub.Core
             if (IsDisposeRequested && !allowWhenDisposed)
                 return;
 
-            if (!_transport.IsStarted)
+            if (!IsStartedState() && !_transport.IsConnected)
             {
                 SetState(PullSubState.Stopped);
                 return;
@@ -264,10 +246,19 @@ namespace PullSub.Core
 
             _log("[PullSubRuntime] Disconnecting...");
 
-            // Set Stopped before StopAsync so that the DisconnectedAsync event fired by MQTTnet
-            // during the clean disconnect is treated as intentional and suppressed in OnDisconnected.
+            // Move to Stopped before disconnecting so OnDisconnected can be treated as intentional.
             SetState(PullSubState.Stopped);
-            await _transport.StopAsync(true, cancellationToken);
+
+            await StopConnectionLoopAsync(cancellationToken);
+
+            if (_transport.IsConnected)
+                await _transport.DisconnectAsync(true, cancellationToken);
+
+            lock (_stateGate)
+            {
+                InitializeReconnectStateNoLock(_transport.ReconnectOptions);
+                ClearNetworkSubscriptionCacheNoLock();
+            }
 
             _log("[PullSubRuntime] Disconnected.");
         }
@@ -275,10 +266,14 @@ namespace PullSub.Core
         private async Task ResubscribeAllTopicsAsync(CancellationToken cancellationToken)
         {
             var gateAcquired = false;
+            var subscriptionGateAcquired = false;
             try
             {
                 await _resubscribeGate.WaitAsync(cancellationToken);
                 gateAcquired = true;
+
+                await _subscriptionGate.WaitAsync(cancellationToken);
+                subscriptionGateAcquired = true;
 
                 if (IsDisposeRequested)
                     return;
@@ -294,6 +289,9 @@ namespace PullSub.Core
                     if (!_subscriptions.TryGetSubscribeQos(topic, out var subscribeQos))
                         continue;
 
+                    if (IsNetworkSubscribedTopic(topic))
+                        continue;
+
                     await SubscribeNetworkAsync(topic, subscribeQos, cancellationToken);
                 }
 
@@ -304,6 +302,9 @@ namespace PullSub.Core
             }
             finally
             {
+                if (subscriptionGateAcquired)
+                    _subscriptionGate.Release();
+
                 if (gateAcquired)
                     _resubscribeGate.Release();
             }
@@ -315,16 +316,18 @@ namespace PullSub.Core
             CancellationToken cancellationToken)
         {
             await _transport.SubscribeAsync(topic, subscribeQos, cancellationToken);
+            MarkNetworkSubscribedTopic(topic);
         }
 
         private async Task UnsubscribeNetworkAsync(string topic, CancellationToken cancellationToken)
         {
             await _transport.UnsubscribeAsync(topic, cancellationToken);
+            MarkNetworkUnsubscribedTopic(topic);
         }
 
         private void EnsureStarted()
         {
-            if (!_transport.IsStarted)
+            if (!IsStartedState())
                 throw new InvalidOperationException("Client is not started. Call StartAsync first.");
         }
 
@@ -397,7 +400,7 @@ namespace PullSub.Core
         {
             try
             {
-                if (IsDisposeRequested || !_transport.IsConnected)
+                if (IsDisposeRequested || !_transport.IsConnected || IsNetworkSubscribedTopic(topic))
                     return;
 
                 await SubscribeNetworkAsync(topic, subscribeQos, _disposeCts.Token);
@@ -431,6 +434,276 @@ namespace PullSub.Core
         private static TaskCompletionSource<bool> CreateReadySignal()
         {
             return new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        private static TaskCompletionSource<bool> CreateDisconnectedSignal()
+        {
+            return new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        private void StartConnectionLoop()
+        {
+            CancellationToken loopToken;
+            lock (_stateGate)
+            {
+                if (IsConnectionLoopRunningNoLock())
+                    return;
+
+                _connectionLoopCts?.Dispose();
+                _connectionLoopCts = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
+                loopToken = _connectionLoopCts.Token;
+            }
+
+            _connectionLoopTask = Task.Run(() => RunConnectionLoopAsync(loopToken), CancellationToken.None);
+        }
+
+        private async Task StopConnectionLoopAsync(CancellationToken cancellationToken)
+        {
+            Task loopTask;
+            CancellationTokenSource loopCts;
+
+            lock (_stateGate)
+            {
+                _disconnectSignal?.TrySetResult(true);
+
+                loopTask = _connectionLoopTask;
+                loopCts = _connectionLoopCts;
+
+                _connectionLoopTask = null;
+                _connectionLoopCts = null;
+            }
+
+            if (loopCts != null)
+            {
+                try
+                {
+                    loopCts.Cancel();
+                }
+                finally
+                {
+                    loopCts.Dispose();
+                }
+            }
+
+            if (loopTask == null)
+                return;
+
+            try
+            {
+                await PullSubAsyncUtils.AwaitWithCancellation(loopTask, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+        }
+
+        private async Task RunConnectionLoopAsync(CancellationToken cancellationToken)
+        {
+            var reconnectOptions = _transport.ReconnectOptions ?? PullSubReconnectOptions.Default;
+            var nextDelay = reconnectOptions.InitialDelay;
+
+            try
+            {
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    TaskCompletionSource<bool> disconnectSignal;
+                    lock (_stateGate)
+                    {
+                        disconnectSignal = CreateDisconnectedSignal();
+                        _disconnectSignal = disconnectSignal;
+                    }
+
+                    try
+                    {
+                        await _transport.ConnectAsync(cancellationToken);
+                        nextDelay = reconnectOptions.InitialDelay;
+
+                        lock (_stateGate)
+                        {
+                            InitializeReconnectStateNoLock(reconnectOptions);
+                        }
+
+                        await PullSubAsyncUtils.AwaitWithCancellation(disconnectSignal.Task, cancellationToken);
+
+                        if (cancellationToken.IsCancellationRequested)
+                            break;
+
+                        if (!ShouldContinueReconnectLoop())
+                            break;
+
+                        SetState(PullSubState.Reconnecting);
+                        var disconnectedDelay = ApplyJitter(nextDelay, reconnectOptions.JitterFactor);
+                        RecordReconnectRetry(disconnectedDelay, "Disconnected");
+                        await Task.Delay(disconnectedDelay, cancellationToken);
+                        nextDelay = ComputeNextDelay(nextDelay, reconnectOptions);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!ShouldContinueReconnectLoop())
+                            break;
+
+                        SetState(PullSubState.Reconnecting);
+                        var retryDelay = ApplyJitter(nextDelay, reconnectOptions.JitterFactor);
+                        RecordReconnectRetry(retryDelay, ex.Message);
+
+                        await Task.Delay(retryDelay, cancellationToken);
+                        nextDelay = ComputeNextDelay(nextDelay, reconnectOptions);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                _logError($"[PullSubRuntime] Connection loop terminated unexpectedly: {ex.Message}");
+                _logException(ex);
+                SetState(PullSubState.Disconnected);
+            }
+        }
+
+        private TimeSpan ApplyJitter(TimeSpan delay, double jitterFactor)
+        {
+            if (jitterFactor <= 0.0)
+                return delay;
+
+            var rangeMs = delay.TotalMilliseconds * jitterFactor;
+            var offsetMs = (_reconnectJitterRandom.NextDouble() * 2.0 - 1.0) * rangeMs;
+            var jitteredMs = Math.Max(1.0, delay.TotalMilliseconds + offsetMs);
+            return TimeSpan.FromMilliseconds(jitteredMs);
+        }
+
+        private static TimeSpan ComputeNextDelay(TimeSpan currentDelay, PullSubReconnectOptions options)
+        {
+            var scaledTicks = (long)(currentDelay.Ticks * options.Multiplier);
+            if (scaledTicks < options.InitialDelay.Ticks)
+                scaledTicks = options.InitialDelay.Ticks;
+
+            if (scaledTicks > options.MaxDelay.Ticks)
+                scaledTicks = options.MaxDelay.Ticks;
+
+            return TimeSpan.FromTicks(scaledTicks);
+        }
+
+        private void InitializeReconnectStateNoLock(PullSubReconnectOptions options)
+        {
+            var resolved = options ?? PullSubReconnectOptions.Default;
+            _reconnectAttemptCount = 0;
+            _reconnectCurrentDelay = resolved.InitialDelay;
+            _reconnectNextRetryAtUtc = default;
+            _reconnectLastFailureReason = string.Empty;
+        }
+
+        private void RecordReconnectRetry(TimeSpan delay, string reason)
+        {
+            lock (_stateGate)
+            {
+                _reconnectAttemptCount++;
+                _reconnectCurrentDelay = delay;
+                _reconnectNextRetryAtUtc = DateTime.UtcNow.Add(delay);
+                _reconnectLastFailureReason = reason ?? string.Empty;
+            }
+        }
+
+        private bool IsConnectionLoopRunningNoLock()
+        {
+            return _connectionLoopTask != null && !_connectionLoopTask.IsCompleted;
+        }
+
+        private bool ShouldContinueReconnectLoop()
+        {
+            lock (_stateGate)
+            {
+                return _state != PullSubState.Stopped
+                    && _state != PullSubState.Disposed;
+            }
+        }
+
+        private bool IsStartedState()
+        {
+            lock (_stateGate)
+            {
+                return IsStartedState(_state);
+            }
+        }
+
+        private bool IsStartedStateNoLock()
+        {
+            return IsStartedState(_state);
+        }
+
+        private static bool IsStartedState(PullSubState state)
+        {
+            return state != PullSubState.NotStarted
+                && state != PullSubState.Stopped
+                && state != PullSubState.Disposed;
+        }
+
+        private void SignalDisconnected()
+        {
+            TaskCompletionSource<bool> disconnectSignal;
+            lock (_stateGate)
+            {
+                disconnectSignal = _disconnectSignal;
+            }
+
+            disconnectSignal?.TrySetResult(true);
+        }
+
+        private bool IsNetworkSubscribedTopic(string topic)
+        {
+            lock (_stateGate)
+            {
+                return _networkSubscribedTopics.Contains(topic);
+            }
+        }
+
+        private void MarkNetworkSubscribedTopic(string topic)
+        {
+            lock (_stateGate)
+            {
+                _networkSubscribedTopics.Add(topic);
+            }
+        }
+
+        private void MarkNetworkUnsubscribedTopic(string topic)
+        {
+            lock (_stateGate)
+            {
+                _networkSubscribedTopics.Remove(topic);
+            }
+        }
+
+        private void ClearNetworkSubscriptionCache()
+        {
+            lock (_stateGate)
+            {
+                _networkSubscribedTopics.Clear();
+            }
+        }
+
+        private void ClearNetworkSubscriptionCacheNoLock()
+        {
+            _networkSubscribedTopics.Clear();
+        }
+
+        internal void GetReconnectStateSnapshot(
+            out int attemptCount,
+            out TimeSpan currentDelay,
+            out DateTime nextRetryAtUtc,
+            out string lastFailureReason)
+        {
+            lock (_stateGate)
+            {
+                attemptCount = _reconnectAttemptCount;
+                currentDelay = _reconnectCurrentDelay;
+                nextRetryAtUtc = _reconnectNextRetryAtUtc;
+                lastFailureReason = _reconnectLastFailureReason;
+            }
         }
 
         internal void ReportPublisherObserverError(Exception exception)

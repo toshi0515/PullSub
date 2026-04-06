@@ -8,7 +8,7 @@ Unknown processor
 
 
 ```
-| Method                        | Mean     | Error   | StdDev  | Gen0   | Allocated |
-|------------------------------ |---------:|--------:|--------:|-------:|----------:|
-| DispatchDataOnly_BorrowPath   | 591.7 ns | 4.61 ns | 5.66 ns | 0.0048 |      48 B |
-| DispatchMixed_CopyOnQueuePath | 688.5 ns | 2.03 ns | 1.80 ns | 0.0238 |     232 B |
+| Method                        | Mean     | Error    | StdDev  | Gen0   | Allocated |
+|------------------------------ |---------:|---------:|--------:|-------:|----------:|
+| DispatchDataOnly_BorrowPath   | 605.9 ns | 10.08 ns | 9.43 ns | 0.0048 |      48 B |
+| DispatchMixed_CopyOnQueuePath | 694.4 ns |  4.16 ns | 3.24 ns | 0.0238 |     232 B |

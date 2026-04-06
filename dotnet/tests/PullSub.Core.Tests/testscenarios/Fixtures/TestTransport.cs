@@ -17,14 +17,16 @@ namespace PullSub.Core.Tests.TestScenarios.Fixtures
 
         private int _subscribeCallCount;
         private int _unsubscribeCallCount;
+        private int _callbacksSet;
 
-        public Func<Task>? OnConnected { get; set; }
-        public Func<string, Task>? OnDisconnected { get; set; }
-        public Func<string, ReadOnlyMemory<byte>, Task>? OnMessageReceived { get; set; }
-        public Func<string, byte[], PullSubQualityOfServiceLevel, bool, Task>? OnEnqueue { get; set; }
+        private Func<Task>? _onConnected;
+        private Func<string, Task>? _onDisconnected;
+        private Func<string, ReadOnlyMemory<byte>, Task>? _onMessageReceived;
 
-        public bool IsStarted { get; private set; }
+        public Func<string, byte[], PullSubQualityOfServiceLevel, bool, CancellationToken, Task>? OnPublish { get; set; }
+
         public bool IsConnected { get; private set; }
+        public PullSubReconnectOptions ReconnectOptions { get; set; } = PullSubReconnectOptions.Default;
 
         public IReadOnlyCollection<(string Topic, byte[] Payload, PullSubQualityOfServiceLevel Qos, bool Retain)> Published
             => _published.ToArray();
@@ -32,26 +34,53 @@ namespace PullSub.Core.Tests.TestScenarios.Fixtures
         public int SubscribeCallCount => Volatile.Read(ref _subscribeCallCount);
         public int UnsubscribeCallCount => Volatile.Read(ref _unsubscribeCallCount);
 
-        public Task StartAsync(CancellationToken cancellationToken)
+        public void SetCallbacks(
+            Func<Task> onConnected,
+            Func<string, Task> onDisconnected,
+            Func<string, ReadOnlyMemory<byte>, Task> onMessageReceived)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            IsStarted = true;
-            IsConnected = true;
-            return OnConnected?.Invoke() ?? Task.CompletedTask;
+            if (onConnected == null)
+                throw new ArgumentNullException(nameof(onConnected));
+
+            if (onDisconnected == null)
+                throw new ArgumentNullException(nameof(onDisconnected));
+
+            if (onMessageReceived == null)
+                throw new ArgumentNullException(nameof(onMessageReceived));
+
+            if (Interlocked.Exchange(ref _callbacksSet, 1) == 1)
+                throw new InvalidOperationException("Callbacks are already set.");
+
+            _onConnected = onConnected;
+            _onDisconnected = onDisconnected;
+            _onMessageReceived = onMessageReceived;
         }
 
-        public Task StopAsync(bool cleanDisconnect, CancellationToken cancellationToken)
+        public Task ConnectAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            IsConnected = true;
+            return _onConnected?.Invoke() ?? Task.CompletedTask;
+        }
+
+        public Task DisconnectAsync(bool cleanDisconnect, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             IsConnected = false;
-            IsStarted = false;
-            return OnDisconnected?.Invoke(cleanDisconnect ? "Clean" : "Force") ?? Task.CompletedTask;
+            return _onDisconnected?.Invoke(cleanDisconnect ? "Clean" : "Force") ?? Task.CompletedTask;
         }
 
-        public Task EnqueueAsync(string topic, byte[] payload, PullSubQualityOfServiceLevel qos, bool retain)
+        public Task PublishAsync(
+            string topic,
+            byte[] payload,
+            PullSubQualityOfServiceLevel qos,
+            bool retain,
+            CancellationToken cancellationToken)
         {
-            if (OnEnqueue != null)
-                return OnEnqueue(topic, payload, qos, retain);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (OnPublish != null)
+                return OnPublish(topic, payload, qos, retain, cancellationToken);
 
             _published.Enqueue((topic, payload, qos, retain));
             return Task.CompletedTask;
@@ -80,7 +109,13 @@ namespace PullSub.Core.Tests.TestScenarios.Fixtures
 
         public Task EmitMessageAsync(string topic, byte[] payload)
         {
-            return OnMessageReceived?.Invoke(topic, payload ?? Array.Empty<byte>()) ?? Task.CompletedTask;
+            return _onMessageReceived?.Invoke(topic, payload ?? Array.Empty<byte>()) ?? Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            IsConnected = false;
+            return default;
         }
     }
 }
