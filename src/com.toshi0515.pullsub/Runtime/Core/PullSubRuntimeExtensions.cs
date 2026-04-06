@@ -63,8 +63,7 @@ namespace PullSub.Core
              IPayloadCodec<T> codec)
         {
             if (!codec.TryDecode(payload.AsSpan(), out var value, out _, out var error))
-                throw new InvalidOperationException(
-                    $"Payload decode failed. topic={topic} error={error}");
+                throw new PullSubPayloadDecodeException(topic, error);
 
             return value;
         }

@@ -70,10 +70,7 @@ namespace PullSub.Core
 
         protected static DateTime NormalizeTimestampOrNow(DateTime timestampUtc)
         {
-            if (timestampUtc == default)
-                return DateTime.UtcNow;
-
-            return timestampUtc.Kind == DateTimeKind.Utc ? timestampUtc : timestampUtc.ToUniversalTime();
+            return PullSubTimestampUtility.NormalizeOrNow(timestampUtc);
         }
 
         protected static DateTime ParseTimestampOrNow(string timestamp)

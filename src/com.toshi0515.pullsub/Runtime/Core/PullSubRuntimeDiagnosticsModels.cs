@@ -2,6 +2,41 @@ using System;
 
 namespace PullSub.Core
 {
+    public readonly struct PullSubRequestDiagnostics
+    {
+        public PullSubRequestDiagnostics(
+            int pendingCount,
+            bool isReplyInboxSubscribed,
+            long timeoutCount,
+            long duplicateDiscardCount,
+            long setupFailureCount,
+            long publishFailureCount,
+            long invalidReplyToDropCount,
+            long connectionLostFailureCount,
+            long runtimeDisposedFailureCount)
+        {
+            PendingCount = pendingCount;
+            IsReplyInboxSubscribed = isReplyInboxSubscribed;
+            TimeoutCount = timeoutCount;
+            DuplicateDiscardCount = duplicateDiscardCount;
+            SetupFailureCount = setupFailureCount;
+            PublishFailureCount = publishFailureCount;
+            InvalidReplyToDropCount = invalidReplyToDropCount;
+            ConnectionLostFailureCount = connectionLostFailureCount;
+            RuntimeDisposedFailureCount = runtimeDisposedFailureCount;
+        }
+
+        public int PendingCount { get; }
+        public bool IsReplyInboxSubscribed { get; }
+        public long TimeoutCount { get; }
+        public long DuplicateDiscardCount { get; }
+        public long SetupFailureCount { get; }
+        public long PublishFailureCount { get; }
+        public long InvalidReplyToDropCount { get; }
+        public long ConnectionLostFailureCount { get; }
+        public long RuntimeDisposedFailureCount { get; }
+    }
+
     public readonly struct PullSubReconnectDiagnostics
     {
         public PullSubReconnectDiagnostics(
@@ -73,6 +108,7 @@ namespace PullSub.Core
             DateTime capturedAtUtc,
             bool hasQueueHandlerDiagnostics,
             PullSubReconnectDiagnostics reconnect,
+            PullSubRequestDiagnostics request,
             PullSubTopicDiagnostics[] topics)
         {
             State = state;
@@ -82,6 +118,7 @@ namespace PullSub.Core
             CapturedAtUtc = capturedAtUtc;
             HasQueueHandlerDiagnostics = hasQueueHandlerDiagnostics;
             Reconnect = reconnect;
+            Request = request;
             Topics = topics ?? Array.Empty<PullSubTopicDiagnostics>();
         }
 
@@ -92,6 +129,7 @@ namespace PullSub.Core
         public DateTime CapturedAtUtc { get; }
         public bool HasQueueHandlerDiagnostics { get; }
         public PullSubReconnectDiagnostics Reconnect { get; }
+        public PullSubRequestDiagnostics Request { get; }
         public PullSubTopicDiagnostics[] Topics { get; }
     }
 }

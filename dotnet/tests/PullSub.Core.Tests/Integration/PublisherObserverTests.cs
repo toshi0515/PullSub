@@ -28,6 +28,7 @@ namespace PullSub.Core.Tests.Integration
             };
 
             await runtime.StartAsync();
+            await runtime.WaitUntilConnectedAsync();
             var observer = runtime.ToPublisher(topic);
 
             observer.OnNext(1);
@@ -65,6 +66,7 @@ namespace PullSub.Core.Tests.Integration
             };
 
             await runtime.StartAsync();
+            await runtime.WaitUntilConnectedAsync();
             var observer = runtime.ToPublisher(topic);
 
             observer.OnNext(10);
@@ -94,6 +96,7 @@ namespace PullSub.Core.Tests.Integration
             transport.OnPublish = (_, _, _, _, _) => throw new InvalidOperationException("publish failed");
 
             await runtime.StartAsync();
+            await runtime.WaitUntilConnectedAsync();
             var observer = runtime.ToPublisher(topic, onError: ex => errors.Add(ex));
 
             observer.OnNext(1);
@@ -122,6 +125,7 @@ namespace PullSub.Core.Tests.Integration
             transport.OnPublish = (_, _, _, _, _) => throw new InvalidOperationException("publish failed");
 
             await runtime.StartAsync();
+            await runtime.WaitUntilConnectedAsync();
             var observer = runtime.ToPublisher(topic);
 
             observer.OnNext(1);
@@ -146,6 +150,7 @@ namespace PullSub.Core.Tests.Integration
             transport.OnPublish = (_, _, _, _, _) => throw new InvalidOperationException("publish failed");
 
             await runtime.StartAsync();
+            await runtime.WaitUntilConnectedAsync();
             var observer = runtime.ToPublisher(
                 topic,
                 onError: _ => throw new ApplicationException("callback failed"));
@@ -167,6 +172,7 @@ namespace PullSub.Core.Tests.Integration
             var errorCount = 0;
 
             await runtime.StartAsync();
+            await runtime.WaitUntilConnectedAsync();
             var observer = runtime.ToPublisher(topic, onError: _ => Interlocked.Increment(ref errorCount));
 
             await runtime.DisposeAsync();

@@ -20,6 +20,10 @@ namespace PullSub.Core
         private readonly PullSubMessageDispatcher _messageDispatcher;
         private readonly PullSubShutdownCoordinator _shutdownCoordinator;
         private readonly HashSet<string> _networkSubscribedTopics = new HashSet<string>(StringComparer.Ordinal);
+        private readonly PullSubRequestOptions _requestOptions;
+        private readonly string _requestRuntimeNonce = Guid.NewGuid().ToString("N");
+        private readonly PullSubPendingRequestStore _pendingRequestStore;
+        private readonly PullSubReplyInboxLease _replyInboxLease;
 
         private readonly Action<string> _log;
         private readonly Action<string> _logWarning;
@@ -44,13 +48,25 @@ namespace PullSub.Core
             Action<string> log = null,
             Action<string> logWarning = null,
             Action<string> logError = null,
-            Action<Exception> logException = null)
+            Action<Exception> logException = null,
+            PullSubRequestOptions requestOptions = null)
         {
             _transport = transport ?? throw new ArgumentNullException(nameof(transport));
             _log = log ?? (_ => { });
             _logWarning = logWarning ?? (_ => { });
             _logError = logError ?? (_ => { });
             _logException = logException ?? (_ => { });
+            _requestOptions = requestOptions ?? PullSubRequestOptions.Default;
+            _pendingRequestStore = new PullSubPendingRequestStore(
+                _requestOptions.MaxPendingRequests,
+                _ => { });
+            _replyInboxLease = new PullSubReplyInboxLease(
+                this,
+                BuildReplyInboxTopic(_requestOptions.ReplyTopicPrefix, _requestRuntimeNonce),
+                _pendingRequestStore,
+                _requestOptions.InboxIdleTimeout,
+                new PullSubQueueOptions(_requestOptions.ReplyInboxQueueDepth),
+                _logException);
             _shutdownCoordinator = new PullSubShutdownCoordinator(_logError);
             _messageDispatcher = new PullSubMessageDispatcher(
                 _subscriptions,
@@ -65,6 +81,10 @@ namespace PullSub.Core
                 HandleMessageReceivedAsync);
         }
 
+        public PullSubRequestOptions RequestOptions => _requestOptions;
+        internal string ReplyInboxTopic => _replyInboxLease.Topic;
+        internal bool IsReplyInboxSubscribed => _replyInboxLease.IsSubscribed;
+
         public PullSubState State
         {
             get
@@ -77,6 +97,85 @@ namespace PullSub.Core
         }
 
         public bool IsReady => !IsDisposeRequested && State == PullSubState.Ready;
+
+        internal void EnsureRequestApiReady()
+        {
+            ThrowIfDisposed();
+            EnsureStarted();
+        }
+
+        internal Task EnsureReplyInboxSubscriptionAsync(CancellationToken cancellationToken)
+        {
+            return _replyInboxLease.EnsureSubscribedAsync(cancellationToken);
+        }
+
+        internal PullSubPendingRequestRegistration RegisterPendingRequest(
+            string correlationId,
+            DateTime deadlineUtc,
+            CancellationToken cancellationToken)
+        {
+            return _pendingRequestStore.Register(correlationId, deadlineUtc, cancellationToken);
+        }
+
+        internal bool TryCompletePendingRequest(string correlationId, byte[] responseEnvelopePayload)
+        {
+            return _pendingRequestStore.TryComplete(correlationId, responseEnvelopePayload);
+        }
+
+        internal void MarkReplyInboxSetupFailure()
+        {
+            _pendingRequestStore.MarkSetupFailure();
+        }
+
+        internal void MarkInvalidReplyToDrop()
+        {
+            _pendingRequestStore.MarkInvalidReplyToDrop();
+        }
+
+        internal void FailRequestPublish(string correlationId, Exception exception)
+        {
+            _pendingRequestStore.FailPendingPublish(
+                correlationId,
+                exception,
+                ClassifyPublishFailure());
+        }
+
+        internal void FailAllPendingRequests(PullSubRequestFailureKind failureKind)
+        {
+            _pendingRequestStore.FailAll(failureKind);
+        }
+
+        internal PullSubPendingRequestStoreDebugSnapshot GetPendingRequestStoreSnapshot()
+        {
+            return _pendingRequestStore.GetDebugSnapshot(_replyInboxLease.IsSubscribed);
+        }
+
+        internal void LogException(Exception exception)
+        {
+            if (exception == null)
+                return;
+
+            _logException(exception);
+        }
+
+        internal PullSubRequestFailureKind ClassifyPublishFailure()
+        {
+            if (IsDisposeRequested)
+                return PullSubRequestFailureKind.RuntimeDisposed;
+
+            if (!_transport.IsConnected)
+                return PullSubRequestFailureKind.ConnectionLost;
+
+            var state = State;
+            if (state == PullSubState.Disconnected
+                || state == PullSubState.Reconnecting
+                || state == PullSubState.Stopped)
+            {
+                return PullSubRequestFailureKind.ConnectionLost;
+            }
+
+            return PullSubRequestFailureKind.PublishFailed;
+        }
 
         /// <summary>
         /// Ensures the managed client has been started.
@@ -198,7 +297,18 @@ namespace PullSub.Core
             }
 
             _disposeCts.Cancel();
+            FailAllPendingRequests(PullSubRequestFailureKind.RuntimeDisposed);
             readySignalSnapshot?.TrySetCanceled();
+
+            try
+            {
+                await _replyInboxLease.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                _logError($"[PullSubRuntime] Reply inbox dispose failure: {ex.Message}");
+                _logException(ex);
+            }
 
             try
             {
@@ -329,6 +439,20 @@ namespace PullSub.Core
         {
             if (!IsStartedState())
                 throw new InvalidOperationException("Client is not started. Call StartAsync first.");
+        }
+
+        private static string BuildReplyInboxTopic(string prefix, string runtimeNonce)
+        {
+            if (string.IsNullOrWhiteSpace(prefix))
+                throw new ArgumentException("prefix is required.", nameof(prefix));
+
+            if (string.IsNullOrWhiteSpace(runtimeNonce))
+                throw new ArgumentException("runtimeNonce is required.", nameof(runtimeNonce));
+
+            var normalizedPrefix = prefix.TrimEnd('/');
+            var topic = $"{normalizedPrefix}/{runtimeNonce}";
+            PullSubSubscriptionRegistry.ValidateExactMatchTopic(topic);
+            return topic;
         }
 
         private void ThrowIfDisposed()

@@ -34,6 +34,11 @@ namespace PullSub.Core.Tests.TestScenarios.Fixtures
         public int SubscribeCallCount => Volatile.Read(ref _subscribeCallCount);
         public int UnsubscribeCallCount => Volatile.Read(ref _unsubscribeCallCount);
 
+        internal void SetConnectedForTest(bool isConnected)
+        {
+            IsConnected = isConnected;
+        }
+
         public void SetCallbacks(
             Func<Task> onConnected,
             Func<string, Task> onDisconnected,

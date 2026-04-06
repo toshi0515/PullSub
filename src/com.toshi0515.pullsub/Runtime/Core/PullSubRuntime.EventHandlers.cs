@@ -34,6 +34,7 @@ namespace PullSub.Core
             if (IsDisposeRequested)
                 return Task.CompletedTask;
 
+            FailAllPendingRequests(PullSubRequestFailureKind.ConnectionLost);
             SignalDisconnected();
             ClearNetworkSubscriptionCache();
 

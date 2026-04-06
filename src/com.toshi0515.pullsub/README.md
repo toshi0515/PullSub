@@ -708,6 +708,7 @@ bool IsReady { get; }
 ### Context API (Recommended for Data API)
 
 Contexts group multiple subscriptions with duplicate prevention and atomic cleanup.
+Context methods internally use Runtime operations, while adding context-scoped duplicate prevention and ownership-based cleanup.
 
 ```csharp
 // Create a context

@@ -56,6 +56,16 @@ namespace PullSub.Core
                     currentDelay: snapshot.ReconnectCurrentDelay,
                     nextRetryAtUtc: snapshot.ReconnectNextRetryAtUtc,
                     lastFailureReason: snapshot.ReconnectLastFailureReason),
+                request: new PullSubRequestDiagnostics(
+                    pendingCount: snapshot.Request.PendingCount,
+                    isReplyInboxSubscribed: snapshot.Request.IsReplyInboxSubscribed,
+                    timeoutCount: snapshot.Request.TimeoutCount,
+                    duplicateDiscardCount: snapshot.Request.DuplicateDiscardCount,
+                    setupFailureCount: snapshot.Request.SetupFailureCount,
+                    publishFailureCount: snapshot.Request.PublishFailureCount,
+                    invalidReplyToDropCount: snapshot.Request.InvalidReplyToDropCount,
+                    connectionLostFailureCount: snapshot.Request.ConnectionLostFailureCount,
+                    runtimeDisposedFailureCount: snapshot.Request.RuntimeDisposedFailureCount),
                 topics: topics);
         }
     }

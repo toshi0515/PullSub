@@ -121,7 +121,7 @@ namespace PullSub.Mqtt
             CancellationToken cancellationToken)
         {
             if (!_client.IsConnected)
-                throw new InvalidOperationException("Transport is not connected.");
+                throw new PullSubConnectionStateException(nameof(PublishAsync));
 
             var message = new MqttApplicationMessageBuilder()
                 .WithTopic(topic)
@@ -136,7 +136,7 @@ namespace PullSub.Mqtt
         public Task SubscribeAsync(string topic, PullSubQualityOfServiceLevel qos, CancellationToken cancellationToken)
         {
             if (!_client.IsConnected)
-                throw new InvalidOperationException("Transport is not connected.");
+                throw new PullSubConnectionStateException(nameof(SubscribeAsync));
 
             return _client.SubscribeAsync(topic, ToMqttNet(qos), cancellationToken);
         }
@@ -144,7 +144,7 @@ namespace PullSub.Mqtt
         public Task UnsubscribeAsync(string topic, CancellationToken cancellationToken)
         {
             if (!_client.IsConnected)
-                throw new InvalidOperationException("Transport is not connected.");
+                throw new PullSubConnectionStateException(nameof(UnsubscribeAsync));
 
             return _client.UnsubscribeAsync(topic, cancellationToken);
         }

@@ -160,6 +160,31 @@ namespace PullSub.Bridge
     }
 
     [Serializable]
+    public sealed class PullSubClientRequestSettings
+    {
+        [Tooltip("Reply topic prefix for request/reply inbox.")]
+        [SerializeField] private string _replyTopicPrefix = PullSubRequestOptions.DefaultReplyTopicPrefix;
+
+        [Tooltip("Inbox idle timeout in seconds. Set 0 to keep subscription active.")]
+        [SerializeField] private int _inboxIdleTimeoutSeconds = PullSubRequestOptions.DefaultInboxIdleTimeoutSeconds;
+
+        [Tooltip("Reply inbox queue depth for request/reply responses.")]
+        [SerializeField] private int _replyInboxQueueDepth = PullSubRequestOptions.DefaultReplyInboxQueueDepth;
+
+        [Tooltip("Maximum number of pending requests per runtime.")]
+        [SerializeField] private int _maxPendingRequests = PullSubRequestOptions.DefaultMaxPendingRequests;
+
+        public PullSubRequestOptions ToCoreOptions()
+        {
+            return new PullSubRequestOptions(
+                replyTopicPrefix: _replyTopicPrefix,
+                inboxIdleTimeoutSeconds: _inboxIdleTimeoutSeconds,
+                replyInboxQueueDepth: _replyInboxQueueDepth,
+                maxPendingRequests: _maxPendingRequests);
+        }
+    }
+
+    [Serializable]
     public sealed class PullSubClientConnectionSettings
     {
         [Header("Broker")]
@@ -177,6 +202,9 @@ namespace PullSub.Bridge
 
         [Header("Reconnect")]
         [SerializeField] private PullSubClientReconnectSettings _reconnectSettings = new PullSubClientReconnectSettings();
+
+        [Header("Request/Reply")]
+        [SerializeField] private PullSubClientRequestSettings _requestSettings = new PullSubClientRequestSettings();
 
         [Header("Transport")]
         [SerializeField] private PullSubClientTransportSettings _transportSettings = new PullSubClientTransportSettings();
@@ -239,6 +267,15 @@ namespace PullSub.Bridge
                 transport: transportOptions);
         }
 
+        public PullSubRequestOptions ToRequestOptions()
+        {
+            EnsureRequestSettings();
+
+            return _requestSettings != null
+                ? _requestSettings.ToCoreOptions()
+                : PullSubRequestOptions.Default;
+        }
+
         internal void MigrateLegacyKeepAliveIfNeeded()
         {
             EnsureKeepAliveSettings();
@@ -289,6 +326,12 @@ namespace PullSub.Bridge
         {
             if (_reconnectSettings == null)
                 _reconnectSettings = new PullSubClientReconnectSettings();
+        }
+
+        private void EnsureRequestSettings()
+        {
+            if (_requestSettings == null)
+                _requestSettings = new PullSubClientRequestSettings();
         }
     }
 }

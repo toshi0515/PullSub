@@ -57,6 +57,7 @@ namespace PullSub.Core
             TimeSpan reconnectCurrentDelay,
             DateTime reconnectNextRetryAtUtc,
             string reconnectLastFailureReason,
+            PullSubPendingRequestStoreDebugSnapshot request,
             PullSubRuntimeTopicDebugSnapshot[] topics)
         {
             State = state;
@@ -69,6 +70,7 @@ namespace PullSub.Core
             ReconnectCurrentDelay = reconnectCurrentDelay;
             ReconnectNextRetryAtUtc = reconnectNextRetryAtUtc;
             ReconnectLastFailureReason = reconnectLastFailureReason;
+            Request = request;
             Topics = topics;
         }
 
@@ -82,6 +84,7 @@ namespace PullSub.Core
         public TimeSpan ReconnectCurrentDelay { get; }
         public DateTime ReconnectNextRetryAtUtc { get; }
         public string ReconnectLastFailureReason { get; }
+        public PullSubPendingRequestStoreDebugSnapshot Request { get; }
         public PullSubRuntimeTopicDebugSnapshot[] Topics { get; }
     }
 
@@ -139,6 +142,8 @@ namespace PullSub.Core
                 && state != PullSubState.Stopped
                 && state != PullSubState.Disposed;
 
+            var requestSnapshot = GetPendingRequestStoreSnapshot();
+
             GetReconnectStateSnapshot(
                 out var reconnectAttemptCount,
                 out var reconnectCurrentDelay,
@@ -156,6 +161,7 @@ namespace PullSub.Core
                 reconnectCurrentDelay,
                 reconnectNextRetryAtUtc,
                 reconnectLastFailureReason,
+                requestSnapshot,
                 topics);
         }
     }

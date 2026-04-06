@@ -115,6 +115,8 @@ namespace PullSub.Core
             _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         }
 
+        internal PullSubRuntime Runtime => _runtime;
+
         internal void SetDebugLabel(string label)
         {
             lock (_gate)

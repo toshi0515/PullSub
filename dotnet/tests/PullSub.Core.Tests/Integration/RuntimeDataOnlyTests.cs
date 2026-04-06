@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using PullSub.Core;
 using PullSub.Core.Tests.TestScenarios.Fixtures;
@@ -61,12 +62,51 @@ namespace PullSub.Core.Tests.Integration
             const string topic = "test/data/publish";
 
             await runtime.StartAsync();
+            await runtime.WaitUntilConnectedAsync();
             await runtime.PublishDataAsync(topic, new SampleClassPayload { Value = 7, Counter = 3 }, codec);
 
             Assert.Single(transport.Published);
             var published = transport.Published.Single();
             Assert.Equal(topic, published.Topic);
             Assert.Equal(8, published.Payload.Length);
+        }
+
+        [Fact]
+        public async Task PublishDataAsync_WhenDisconnected_ThrowsConnectionStateException()
+        {
+            var transport = new TestTransport();
+            await using var runtime = new PullSubRuntime(transport);
+
+            await runtime.StartAsync();
+            await runtime.WaitUntilConnectedAsync();
+            transport.SetConnectedForTest(false);
+
+            var ex = await Assert.ThrowsAsync<PullSubConnectionStateException>(() =>
+                runtime.PublishDataAsync(
+                    "test/data/disconnected",
+                    new SampleClassPayload { Value = 1, Counter = 2 },
+                    new SampleClassCodec()));
+
+            Assert.Equal("PublishRawAsync", ex.Operation);
+        }
+
+        [Fact]
+        public async Task ReceiveQueueAsync_DecodeFailure_ThrowsPayloadDecodeException()
+        {
+            var transport = new TestTransport();
+            await using var runtime = new PullSubRuntime(transport);
+
+            const string topic = "test/queue/decode-failure";
+
+            await runtime.StartAsync();
+            await runtime.SubscribeQueueAsync(topic, PullSubQueueOptions.Default);
+            await transport.EmitMessageAsync(topic, new byte[] { 1, 2, 3 });
+
+            var ex = await Assert.ThrowsAsync<PullSubPayloadDecodeException>(() =>
+                runtime.ReceiveQueueAsync(topic, new SampleClassCodec()));
+
+            Assert.Equal(topic, ex.Topic);
+            Assert.Equal("payload too small", ex.DecodeError);
         }
 
         private static byte[] Encode(IPayloadCodec<SampleClassPayload> codec, SampleClassPayload payload)

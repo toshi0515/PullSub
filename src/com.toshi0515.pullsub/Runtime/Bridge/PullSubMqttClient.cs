@@ -137,7 +137,8 @@ namespace PullSub.Bridge
                 log: message => Debug.Log(message),
                 logWarning: message => Debug.LogWarning(message),
                 logError: message => Debug.LogError(message),
-                logException: ex => Debug.LogException(ex));
+                logException: ex => Debug.LogException(ex),
+                requestOptions: _connectionSettings.ToRequestOptions());
 
             _initialized = true;
         }

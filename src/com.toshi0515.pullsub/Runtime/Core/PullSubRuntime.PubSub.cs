@@ -23,7 +23,7 @@ namespace PullSub.Core
             EnsureStarted();
 
             if (!_transport.IsConnected)
-                throw new InvalidOperationException("Transport is not connected.");
+                throw new PullSubConnectionStateException(nameof(PublishRawAsync));
 
             var operationToken = CreateOperationToken(cancellationToken, out var linkedCts);
             try

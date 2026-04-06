@@ -454,24 +454,47 @@ namespace PullSub.Editor
                     }
                 }
 
-                EditorGUILayout.LabelField($"Scene: {clientGameObject.scene.name}");
-                EditorGUILayout.LabelField($"ClientId: {connection.ClientIdText} | Policy: {connection.ClientIdPolicy}");
-
                 if (runtime == null)
                 {
+                    EditorGUILayout.LabelField($"Scene: {clientGameObject.scene.name}");
+                    EditorGUILayout.LabelField($"ClientId: {connection.ClientIdText} | Policy: {connection.ClientIdPolicy}");
                     EditorGUILayout.HelpBox("Runtime is not initialized yet.", MessageType.Warning);
                     return;
                 }
 
                 var snapshot = view.Snapshot;
                 var status = snapshot.IsConnected ? "Connected" : "Disconnected";
-                EditorGUILayout.LabelField($"State: {snapshot.State} | {status} | Ready: {(snapshot.IsReady ? "Yes" : "No")}");
-                DrawReconnectSection(snapshot);
 
+                EditorGUILayout.LabelField("Overview", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField($"Scene: {clientGameObject.scene.name}");
+                EditorGUILayout.LabelField($"State: {snapshot.State} | {status} | Ready: {(snapshot.IsReady ? "Yes" : "No")}");
+                DrawRuntimeMetaSection(snapshot);
+
+                EditorGUILayout.Space(4f);
+                EditorGUILayout.LabelField("Connection", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField($"ClientId: {connection.ClientIdText} | Policy: {connection.ClientIdPolicy}");
+                DrawReconnectSection(snapshot);
+                DrawRequestSection(snapshot.Request);
+
+                DrawContextSection(client.GetInstanceID(), snapshot.CapturedAtUtc, view.Topics, view.Contexts);
+
+                EditorGUILayout.Space(4f);
+                EditorGUILayout.LabelField("Topics", EditorStyles.boldLabel);
                 DrawTopicTable(client.GetInstanceID(), snapshot.CapturedAtUtc, view.Topics);
                 DrawRemovedTopicSection(client.GetInstanceID());
-                DrawContextSection(client.GetInstanceID(), snapshot.CapturedAtUtc, view.Topics, view.Contexts);
             }
+        }
+
+        private static void DrawRuntimeMetaSection(PullSubRuntimeDebugSnapshot snapshot)
+        {
+            var snapshotAgeMs = Math.Max(0, (DateTime.UtcNow - snapshot.CapturedAtUtc).TotalMilliseconds);
+            var line =
+                $"Runtime: Started={(snapshot.IsStarted ? "Yes" : "No")}, CapturedAtUtc={snapshot.CapturedAtUtc:O}, SnapshotAge={snapshotAgeMs:F0}ms, QueueHandlerDiagnostics={(snapshot.HasQueueHandlerDiagnostics ? "Enabled" : "Disabled")}";
+
+            if (!snapshot.HasQueueHandlerDiagnostics)
+                DrawWarningLabel(line);
+            else
+                EditorGUILayout.LabelField(line);
         }
 
         private static void DrawReconnectSection(PullSubRuntimeDebugSnapshot snapshot)
@@ -495,6 +518,35 @@ namespace PullSub.Editor
             EditorGUILayout.LabelField($"  LastFailure: {reason}");
         }
 
+        private static void DrawRequestSection(PullSubPendingRequestStoreDebugSnapshot request)
+        {
+            EditorGUILayout.Space(4f);
+            EditorGUILayout.LabelField("Request/Reply", EditorStyles.boldLabel);
+
+            EditorGUILayout.LabelField(
+                $"  Pending: {request.PendingCount} | ReplyInboxSubscribed: {(request.IsReplyInboxSubscribed ? "Yes" : "No")}");
+
+            var failures =
+                $"  Failures: Timeout={request.TimeoutCount}, Publish={request.PublishFailureCount}, Setup={request.SetupFailureCount}, InvalidReplyTo={request.InvalidReplyToDropCount}, ConnectionLost={request.ConnectionLostFailureCount}, RuntimeDisposed={request.RuntimeDisposedFailureCount}, DuplicateDiscard={request.DuplicateDiscardCount}";
+
+            if (HasRequestWarnings(request))
+                DrawWarningLabel(failures);
+            else
+                EditorGUILayout.LabelField(failures);
+        }
+
+        private static bool HasRequestWarnings(PullSubPendingRequestStoreDebugSnapshot request)
+        {
+            return request.TimeoutCount > 0
+                || request.DuplicateDiscardCount > 0
+                || request.SetupFailureCount > 0
+                || request.PublishFailureCount > 0
+                || request.InvalidReplyToDropCount > 0
+                || request.ConnectionLostFailureCount > 0
+                || request.RuntimeDisposedFailureCount > 0
+                || (request.PendingCount > 0 && !request.IsReplyInboxSubscribed);
+        }
+
         private void DrawTopicTable(int clientId, DateTime capturedAtUtc, PullSubRuntimeTopicDebugSnapshot[] topics)
         {
             if (topics.Length == 0)
@@ -516,8 +568,10 @@ namespace PullSub.Editor
                     ? BuildQueueState(topic, capturedAtUtc)
                     : "-";
 
-                EditorGUILayout.LabelField($"{kind} {topic.Topic}");
-                var details = $"    Data: {dataState} | Queue: {queueState} | QoS: {topic.SubscribeQos}";
+                EditorGUILayout.LabelField(
+                    $"{kind} {topic.Topic} | Subs(Data={topic.DataSubCount}, Queue={topic.QueueSubCount})");
+                var details =
+                    $"    Data: {dataState} | Queue: {queueState} | ReceiveCount: {topic.DataReceiveCount} | QoS: {topic.SubscribeQos}";
 
                 if (topic.DataSubCount > 0 && warnLatency)
                     DrawWarningLabel(details);
