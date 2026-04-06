@@ -597,6 +597,44 @@ namespace PullSub.Core
                 cancellationToken);
         }
 
+        /// <summary>
+        /// Creates an <see cref="IObserver{T}"/> that publishes each OnNext value through PullSubRuntime.
+        ///
+        /// The observer serializes publish calls so that only one publish runs at a time.
+        /// After OnCompleted/OnError, subsequent OnNext calls are ignored.
+        /// </summary>
+        /// <remarks>
+        /// If <paramref name="onError"/> is null, publish failures are reported to PullSubRuntime log callbacks.
+        ///
+        /// OnNext can be called concurrently from multiple threads; calls are serialized by the observer.
+        /// The relative order of truly concurrent producer calls depends on scheduling.
+        /// If OnNext input rate exceeds publish completion rate, pending OnNext work items can accumulate.
+        ///
+        /// Runtime disposal is treated as graceful termination for this observer.
+        /// ObjectDisposedException and runtime-dispose OperationCanceledException do not trigger <paramref name="onError"/>.
+        /// </remarks>
+        /// <param name="runtime">Target runtime used for publishing.</param>
+        /// <param name="topic">Typed topic used for encoding and topic name binding.</param>
+        /// <param name="qos">Publish QoS.</param>
+        /// <param name="retain">MQTT retain flag.</param>
+        /// <param name="onError">Optional callback for non-dispose publish failures.</param>
+        /// <returns>An observer that publishes incoming values.</returns>
+        public static IObserver<T> ToPublisher<T>(
+            this PullSubRuntime runtime,
+            IPullSubTopic<T> topic,
+            PullSubQualityOfServiceLevel qos = 0,
+            bool retain = false,
+            Action<Exception> onError = null)
+        {
+            if (runtime == null)
+                throw new ArgumentNullException(nameof(runtime));
+
+            if (topic == null)
+                throw new ArgumentNullException(nameof(topic));
+
+            return new PullSubPublishObserver<T>(runtime, topic, qos, retain, onError);
+        }
+
         public static PullSubDataHandle<T> GetDataHandle<T>(
             this PullSubRuntime runtime,
             IPullSubTopic<T> topic)

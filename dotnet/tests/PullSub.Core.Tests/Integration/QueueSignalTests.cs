@@ -20,14 +20,15 @@ namespace PullSub.Core.Tests.Integration
             await runtime.StartAsync();
             await runtime.SubscribeQueueAsync(topic, new PullSubQueueOptions(8));
 
-            var firstWait = runtime.ReceiveQueueAsync(topic);
+            using var receiveCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var firstWait = runtime.ReceiveQueueAsync(topic, receiveCts.Token);
             await Task.Delay(20);
 
             await transport.EmitMessageAsync(topic, BuildPayload(1));
             await transport.EmitMessageAsync(topic, BuildPayload(2));
 
             var first = await firstWait;
-            var second = await runtime.ReceiveQueueAsync(topic);
+            var second = await runtime.ReceiveQueueAsync(topic, receiveCts.Token);
 
             Assert.Equal(1, ReadSequence(first.Payload));
             Assert.Equal(2, ReadSequence(second.Payload));

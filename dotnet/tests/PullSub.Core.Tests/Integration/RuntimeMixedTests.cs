@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Threading;
 using System.Threading.Tasks;
 using PullSub.Core;
 using PullSub.Core.Tests.TestScenarios.Fixtures;
@@ -32,7 +33,8 @@ namespace PullSub.Core.Tests.Integration
             // Mutate source after emit; queue path should have copied payload already.
             Array.Clear(sourcePayload, 0, sourcePayload.Length);
 
-            var queueMessage = await runtime.ReceiveQueueAsync(topic);
+            using var receiveCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var queueMessage = await runtime.ReceiveQueueAsync(topic, receiveCts.Token);
             var ok = codec.TryDecode(queueMessage.Payload, out var queued, out _, out _);
 
             Assert.True(ok);

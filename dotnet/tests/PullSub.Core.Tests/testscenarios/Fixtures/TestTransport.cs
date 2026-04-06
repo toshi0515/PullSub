@@ -12,8 +12,8 @@ namespace PullSub.Core.Tests.TestScenarios.Fixtures
         private readonly ConcurrentQueue<(string Topic, byte[] Payload, PullSubQualityOfServiceLevel Qos, bool Retain)> _published
             = new ConcurrentQueue<(string Topic, byte[] Payload, PullSubQualityOfServiceLevel Qos, bool Retain)>();
 
-        private readonly Dictionary<string, PullSubQualityOfServiceLevel> _subscriptions
-            = new Dictionary<string, PullSubQualityOfServiceLevel>(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, PullSubQualityOfServiceLevel> _subscriptions
+            = new ConcurrentDictionary<string, PullSubQualityOfServiceLevel>(StringComparer.Ordinal);
 
         private int _subscribeCallCount;
         private int _unsubscribeCallCount;
@@ -21,6 +21,7 @@ namespace PullSub.Core.Tests.TestScenarios.Fixtures
         public Func<Task>? OnConnected { get; set; }
         public Func<string, Task>? OnDisconnected { get; set; }
         public Func<string, ReadOnlyMemory<byte>, Task>? OnMessageReceived { get; set; }
+        public Func<string, byte[], PullSubQualityOfServiceLevel, bool, Task>? OnEnqueue { get; set; }
 
         public bool IsStarted { get; private set; }
         public bool IsConnected { get; private set; }
@@ -49,8 +50,16 @@ namespace PullSub.Core.Tests.TestScenarios.Fixtures
 
         public Task EnqueueAsync(string topic, byte[] payload, PullSubQualityOfServiceLevel qos, bool retain)
         {
+            if (OnEnqueue != null)
+                return OnEnqueue(topic, payload, qos, retain);
+
             _published.Enqueue((topic, payload, qos, retain));
             return Task.CompletedTask;
+        }
+
+        public void RecordPublished(string topic, byte[] payload, PullSubQualityOfServiceLevel qos, bool retain)
+        {
+            _published.Enqueue((topic, payload, qos, retain));
         }
 
         public Task SubscribeAsync(string topic, PullSubQualityOfServiceLevel qos, CancellationToken cancellationToken)
@@ -65,7 +74,7 @@ namespace PullSub.Core.Tests.TestScenarios.Fixtures
         {
             cancellationToken.ThrowIfCancellationRequested();
             Interlocked.Increment(ref _unsubscribeCallCount);
-            _subscriptions.Remove(topic);
+            _subscriptions.TryRemove(topic, out _);
             return Task.CompletedTask;
         }
 

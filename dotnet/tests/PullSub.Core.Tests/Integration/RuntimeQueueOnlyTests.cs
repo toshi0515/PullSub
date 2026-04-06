@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Threading;
 using System.Threading.Tasks;
 using PullSub.Core;
 using PullSub.Core.Tests.TestScenarios.Fixtures;
@@ -22,7 +23,8 @@ namespace PullSub.Core.Tests.Integration
             await transport.EmitMessageAsync(topic, BuildPayload(1));
             await transport.EmitMessageAsync(topic, BuildPayload(2));
 
-            var msg = await runtime.ReceiveQueueAsync(topic);
+            using var receiveCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var msg = await runtime.ReceiveQueueAsync(topic, receiveCts.Token);
             var sequence = BinaryPrimitives.ReadInt32LittleEndian(msg.Payload.AsSpan(0, 4));
 
             Assert.Equal(2, sequence);

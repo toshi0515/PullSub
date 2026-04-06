@@ -433,6 +433,15 @@ namespace PullSub.Core
             return new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
+        internal void ReportPublisherObserverError(Exception exception)
+        {
+            if (exception == null)
+                return;
+
+            _logError($"[PullSubPublishObserver] Publish failed: {exception.Message}");
+            _logException(exception);
+        }
+
         internal bool IsDisposeRequested => Volatile.Read(ref _disposeGuard) != 0;
     }
 }

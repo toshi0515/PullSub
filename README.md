@@ -311,6 +311,30 @@ var position = new Position
 await _client.Runtime.PublishDataAsync(Topics.Position, position);
 ```
 
+### 6. Publish from IObservable<T> (Publisher-only helper)
+
+Use `ToPublisher()` to connect any `IObservable<T>` stream to PullSub publish.
+This helper uses `IObservable<T>` / `IObserver<T>` from BCL, so it works with
+R3, UniRx, or System.Reactive streams.
+
+```csharp
+sensorStream
+    .ThrottleFirst(TimeSpan.FromMilliseconds(100))
+    .Subscribe(_client.Runtime.ToPublisher(
+    Topics.Position,
+    onError: ex => Debug.LogError($"Publish failed: {ex.Message}")));
+```
+
+Notes:
+
+- `ToPublisher()` serializes publish calls so that only one publish runs at a time.
+- After source `OnCompleted` / `OnError`, subsequent `OnNext` values are ignored.
+- If `onError` is omitted, publish failures are forwarded to PullSubRuntime logging callbacks.
+- Runtime disposal does not invoke `onError` (treated as graceful termination).
+- If source `OnNext` rate exceeds publish completion rate, pending work can accumulate.
+- Receive-side `ToObservable()` is intentionally not provided by the library.
+    For receive reactive flows, compose from polling (`Update` / `EveryUpdate`) or use Queue API.
+
 ---
 
 ## Quick Start — .NET
@@ -897,6 +921,13 @@ Task PublishRawAsync(string topic, byte[] payload,
     PullSubQualityOfServiceLevel qos = AtMostOnce,
     bool retain = false,
     CancellationToken ct = default)
+
+IObserver<T> ToPublisher<T>(
+    this PullSubRuntime runtime,
+    IPullSubTopic<T> topic,
+    PullSubQualityOfServiceLevel qos = AtMostOnce,
+    bool retain = false,
+    Action<Exception> onError = null)
 ```
 
 ### PullSubDataHandle\<T\>
