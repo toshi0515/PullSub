@@ -142,7 +142,7 @@ namespace PullSub.Core
             }
         }
 
-        public async Task<PullSubDataSubscription<T>> SubscribeDataAsync<T>(
+        public async Task<PullSubDataHandle<T>> SubscribeDataAsync<T>(
             IPullSubTopic<T> topic,
             PullSubQualityOfServiceLevel subscribeQos = PullSubQualityOfServiceLevel.AtLeastOnce,
             CancellationToken cancellationToken = default)
@@ -167,13 +167,12 @@ namespace PullSub.Core
                 _inFlightTopics.Add(key);
             }
 
-            PullSubDataSubscription<T> subscription;
+            PullSubDataHandle<T> handle;
             try
             {
                 // Context-side duplicate checks must happen before Runtime subscribe.
                 await _runtime.SubscribeDataTopicAsync(topic, subscribeQos, cancellationToken).ConfigureAwait(false);
-                var handle = _runtime.GetDataHandle(topic);
-                subscription = new PullSubDataSubscription<T>(_runtime, topic, handle);
+                handle = _runtime.GetDataHandle(topic);
             }
             catch
             {
@@ -196,17 +195,17 @@ namespace PullSub.Core
                 }
                 else
                 {
-                    _activeSubscriptions[key] = CreateLease(subscription);
+                    _activeSubscriptions[key] = CreateLease(handle);
                 }
             }
 
             if (shouldCleanupImmediately)
             {
-                await subscription.UnsubscribeAsync(CancellationToken.None).ConfigureAwait(false);
+                await handle.UnsubscribeAsync(CancellationToken.None).ConfigureAwait(false);
                 throw new ObjectDisposedException(nameof(PullSubContext));
             }
 
-            return subscription;
+            return handle;
         }
 
         public Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
@@ -487,15 +486,15 @@ namespace PullSub.Core
             return Volatile.Read(ref _disposed) != 0;
         }
 
-        private static ContextSubscriptionLease CreateLease<T>(PullSubDataSubscription<T> subscription)
+        private static ContextSubscriptionLease CreateLease<T>(PullSubDataHandle<T> handle)
         {
-            if (subscription == null)
-                throw new ArgumentNullException(nameof(subscription));
+            if (handle == null)
+                throw new ArgumentNullException(nameof(handle));
 
             return new ContextSubscriptionLease(
-                subscription.Topic,
-                subscription.UnsubscribeAsync,
-                subscription.Dispose);
+                handle.Topic,
+                handle.UnsubscribeAsync,
+                handle.Dispose);
         }
 
         private static ContextSubscriptionLease CreateLease(PullSubQueueSubscription subscription)

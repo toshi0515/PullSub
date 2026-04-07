@@ -16,13 +16,13 @@ namespace PullSub.Core.Tests.Integration
             await runtime.StartAsync();
 
             var topic = PullSubTopic.Create("test/context/runtime-subscribe", new SampleClassCodec());
-            await using var subscription = await runtime.SubscribeDataAsync(topic);
+            await using var handle = await runtime.SubscribeDataAsync(topic);
 
-            Assert.NotNull(subscription.Handle);
-            Assert.Equal(topic.TopicName, subscription.Topic);
+            Assert.NotNull(handle);
+            Assert.Equal(topic.TopicName, handle.Topic);
             Assert.Equal(1, transport.SubscribeCallCount);
 
-            await subscription.DisposeAsync();
+            await handle.DisposeAsync();
 
             Assert.Equal(1, transport.UnsubscribeCallCount);
         }
@@ -62,8 +62,8 @@ namespace PullSub.Core.Tests.Integration
             var task1 = context.SubscribeDataAsync(topic);
             var task2 = context.SubscribeDataAsync(topic);
 
-            PullSubDataSubscription<SampleClassPayload>? subscription1 = null;
-            PullSubDataSubscription<SampleClassPayload>? subscription2 = null;
+            PullSubDataHandle<SampleClassPayload>? subscription1 = null;
+            PullSubDataHandle<SampleClassPayload>? subscription2 = null;
             Exception? exception1 = null;
             Exception? exception2 = null;
 
@@ -92,6 +92,25 @@ namespace PullSub.Core.Tests.Integration
             await context.DisposeAsync();
 
             Assert.Equal(1, transport.UnsubscribeCallCount);
+        }
+
+        [Fact]
+        public async Task DataHandle_UnsubscribeAsync_SecondCallReturnsAlreadyCanceled()
+        {
+            var transport = new TestTransport();
+            await using var runtime = new PullSubRuntime(transport);
+            await runtime.StartAsync();
+
+            var topic = PullSubTopic.Create("test/context/data-idempotent-unsubscribe", new SampleClassCodec());
+            var handle = await runtime.SubscribeDataAsync(topic);
+
+            var first = await handle.UnsubscribeAsync();
+            var unsubscribeCallsAfterFirst = transport.UnsubscribeCallCount;
+            var second = await handle.UnsubscribeAsync();
+
+            Assert.Equal(PullSubUnsubscribeResult.Success, first);
+            Assert.Equal(PullSubUnsubscribeResult.AlreadyCanceled, second);
+            Assert.Equal(unsubscribeCallsAfterFirst, transport.UnsubscribeCallCount);
         }
 
         [Fact]

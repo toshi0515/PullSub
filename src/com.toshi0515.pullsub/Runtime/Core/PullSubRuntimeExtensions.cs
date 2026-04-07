@@ -16,7 +16,7 @@ namespace PullSub.Core
             return context;
         }
 
-        public static async Task<PullSubDataSubscription<T>> SubscribeDataAsync<T>(
+        public static async Task<PullSubDataHandle<T>> SubscribeDataAsync<T>(
             this PullSubRuntime runtime,
             IPullSubTopic<T> topic,
             PullSubQualityOfServiceLevel subscribeQos = PullSubQualityOfServiceLevel.AtLeastOnce,
@@ -29,8 +29,7 @@ namespace PullSub.Core
                 throw new ArgumentNullException(nameof(topic));
 
             await runtime.SubscribeDataTopicAsync(topic, subscribeQos, cancellationToken).ConfigureAwait(false);
-            var handle = runtime.GetDataHandle(topic);
-            return new PullSubDataSubscription<T>(runtime, topic, handle);
+            return runtime.GetDataHandle(topic);
         }
 
         internal static Task SubscribeDataAsync<T>(

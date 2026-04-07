@@ -37,8 +37,8 @@ namespace PullSub.Bridge
             return context;
         }
 
-        public static PullSubDataSubscription<T> AddTo<T>(
-            this PullSubDataSubscription<T> subscription,
+        public static PullSubDataHandle<T> AddTo<T>(
+            this PullSubDataHandle<T> subscription,
             MonoBehaviour behaviour)
         {
             if (subscription == null)
@@ -51,8 +51,8 @@ namespace PullSub.Bridge
             return subscription;
         }
 
-        public static PullSubDataSubscription<T> AddTo<T>(
-            this PullSubDataSubscription<T> subscription,
+        public static PullSubDataHandle<T> AddTo<T>(
+            this PullSubDataHandle<T> subscription,
             CancellationToken cancellationToken)
         {
             if (subscription == null)

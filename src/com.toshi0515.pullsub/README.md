@@ -54,10 +54,8 @@ public class RobotController : MonoBehaviour
         var context = _client.Runtime.CreateContext()
             .AddTo(this);  // Automatic disposal on OnDestroy
 
-        // Subscribe and get handle in one step
-        var subscription = await context.SubscribeDataAsync(Topics.Position);
-
-        _positionHandle = subscription.Handle;
+        // Subscribe returns the data handle directly
+        _positionHandle = await context.SubscribeDataAsync(Topics.Position);
     }
 
     private void Update()
@@ -259,11 +257,8 @@ public class RobotController : MonoBehaviour
         var context = _client.Runtime.CreateContext()
             .AddTo(this);  // Automatic cleanup on OnDestroy
 
-        // Subscribe data: returns a PullSubDataSubscription<T> that wraps the Handle
-        var subscription = await context.SubscribeDataAsync(Topics.Position);
-
-        // Obtain handle from subscription and reuse it every frame
-        _positionHandle = subscription.Handle;
+        // Subscribe data: returns PullSubDataHandle<T> directly
+        _positionHandle = await context.SubscribeDataAsync(Topics.Position);
     }
 
     private void Update()
@@ -438,11 +433,9 @@ await runtime.WaitUntilConnectedAsync(cts.Token);
 
 // Create a context and subscribe
 await using var context = runtime.CreateContext();
-await using var subscription = await context.SubscribeDataAsync(
+await using var handle = await context.SubscribeDataAsync(
     Topics.Position,
     cancellationToken: cts.Token);
-
-var handle = subscription.Handle;
 
 // 100 Hz loop
 while (!cts.IsCancellationRequested)
@@ -454,7 +447,7 @@ while (!cts.IsCancellationRequested)
     }
     await Task.Delay(10, cts.Token);
 }
-// context and subscription automatically disposed via await using
+// context and handle automatically disposed via await using
 ```
 
 **Context API Benefits:**
@@ -574,8 +567,7 @@ public sealed class RobotController : MonoBehaviour
         {
             _context = _client.Runtime.CreateContext().AddTo(this);
 
-            var positionSubscription = await _context.SubscribeDataAsync(Topics.Position);
-            _positionHandle = positionSubscription.Handle;
+            _positionHandle = await _context.SubscribeDataAsync(Topics.Position);
 
             await _context.SubscribeQueueAsync(
                 Topics.RobotCommand,
@@ -826,8 +818,8 @@ Context methods internally use Runtime operations, while adding context-scoped d
 PullSubContext CreateContext(this PullSubRuntime runtime)
 
 // Subscribe through context (recommended, instance methods on PullSubContext).
-// Returns a Subscription<T> containing the Handle and unsubscribe capability.
-Task<PullSubDataSubscription<T>> SubscribeDataAsync<T>(
+// Returns PullSubDataHandle<T> with both data access and unsubscribe capability.
+Task<PullSubDataHandle<T>> SubscribeDataAsync<T>(
     IPullSubTopic<T> topic,
     PullSubQualityOfServiceLevel subscribeQos = AtLeastOnce,
     CancellationToken ct = default)
@@ -850,9 +842,8 @@ PullSubContext AddTo(this PullSubContext context, MonoBehaviour behaviour)
 PullSubContext AddTo(this PullSubContext context, CancellationToken cancellationToken)
 ```
 
-**PullSubDataSubscription\<T\>** (returned by `SubscribeDataAsync<T>`):
+**PullSubDataHandle\<T\>** (returned by `SubscribeDataAsync<T>`):
 ```csharp
-PullSubDataHandle<T> Handle { get; }  // Access latest value
 string Topic { get; }
 
 // Data access delegates to Handle
@@ -868,11 +859,11 @@ bool TryGet(out T value, out DateTime timestampUtc)
 // Unsubscribe this topic
 Task<PullSubUnsubscribeResult> UnsubscribeAsync(CancellationToken ct = default)
 
-// Unity: Bind subscription to MonoBehaviour lifecycle
-PullSubDataSubscription<T> AddTo<T>(this PullSubDataSubscription<T> sub, MonoBehaviour behaviour)
+// Unity: Bind handle to MonoBehaviour lifecycle
+PullSubDataHandle<T> AddTo<T>(this PullSubDataHandle<T> handle, MonoBehaviour behaviour)
 
-// Unity/General: Bind subscription to any cancellation token lifecycle
-PullSubDataSubscription<T> AddTo<T>(this PullSubDataSubscription<T> sub, CancellationToken cancellationToken)
+// Unity/General: Bind handle to any cancellation token lifecycle
+PullSubDataHandle<T> AddTo<T>(this PullSubDataHandle<T> handle, CancellationToken cancellationToken)
 ```
 
 **PullSubUnsubscribeResult** (enum):
