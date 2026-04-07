@@ -25,8 +25,6 @@ namespace PullSub.Mqtt
 
             var transport = connectionOptions.Transport;
 
-            WarnIfTransportTlsMismatch(transport, connectionOptions.Tls, logWarning);
-
             var mqttFactory = new MqttFactory();
             var clientOptionsBuilder = mqttFactory.CreateClientOptionsBuilder()
                 .WithClientId(clientId)
@@ -91,7 +89,7 @@ namespace PullSub.Mqtt
                     return ApplyTcpTlsOptions(clientOptionsBuilder, tls);
 
                 case MqttTransportKind.Ws:
-                    // Ws では TLS は使用しない（WarnIfTransportTlsMismatch で警告済み）
+                    // Ws + TLS の組み合わせは MqttConnectionOptions の生成時に fail-fast される。
                     return clientOptionsBuilder;
 
                 case MqttTransportKind.Wss:
@@ -155,19 +153,6 @@ namespace PullSub.Mqtt
 
                 // SslProtocols は WebSocket TLS 経路では適用しない
             });
-        }
-
-        private static void WarnIfTransportTlsMismatch(
-            MqttTransportOptions transport,
-            MqttTlsOptions tls,
-            Action<string> logWarning)
-        {
-            if (transport.Kind == MqttTransportKind.Ws && tls.Enabled)
-            {
-                logWarning?.Invoke(
-                    "[MqttOptionsFactory] Transport=Ws で TLS が有効になっていますが、Ws は非暗号化接続（ws://）です。" +
-                    " TLS 設定は無視されます。暗号化が必要な場合は Transport=Wss を使用してください。");
-            }
         }
 
         private static MqttClientOptionsBuilder ApplyKeepAliveOptions(

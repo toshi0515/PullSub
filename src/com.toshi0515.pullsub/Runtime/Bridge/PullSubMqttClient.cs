@@ -138,7 +138,8 @@ namespace PullSub.Bridge
                 logWarning: message => Debug.LogWarning(message),
                 logError: message => Debug.LogError(message),
                 logException: ex => Debug.LogException(ex),
-                requestOptions: _connectionSettings.ToRequestOptions());
+                requestOptions: _connectionSettings.ToRequestOptions(),
+                runtimeOptions: _connectionSettings.ToRuntimeOptions());
 
             _initialized = true;
         }
@@ -148,7 +149,7 @@ namespace PullSub.Bridge
             var tls = connectionOptions.Tls;
             var transport = connectionOptions.Transport;
 
-            // Ws + TLS enabled is already warned by transport logs; avoid duplicate warnings here.
+            // Ws + TLS invalid combination is rejected by MqttConnectionOptions before runtime starts.
             if (!tls.Enabled || transport.Kind == MqttTransportKind.Ws)
                 return;
 

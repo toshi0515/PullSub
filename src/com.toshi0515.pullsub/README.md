@@ -100,9 +100,9 @@ PullSub abstracts transport protocols behind `ITransport`. You can use protocols
 
 ---
 
-## Two APIs for Two Different Problems
+## Three APIs for Three Different Problems
 
-**Data API keeps the latest value. Queue API keeps every message.**
+**Data API keeps the latest value. Queue API keeps every message. Request-Reply API correlates one request to one response.**
 
 ### Data API — for *state*
 
@@ -132,6 +132,48 @@ Use this for data where every message must be processed in order, such as comman
 var registration = await runtime.SubscribeQueueAsync(
     Topics.Command,
     async (command, ct) => await robot.ExecuteAsync(command, ct));
+```
+
+### Request-Reply API — for *RPC-like workflows*
+
+Use this when you need one response per request, such as command execution acknowledgement,
+query-response operations, or remote validation.
+
+Request-Reply in current PullSub is designed for small/medium RPC payloads with safety guards.
+If you need large blob transfer or stream semantics, prefer Queue/Data APIs or a dedicated file/stream transport.
+
+```csharp
+public static class RequestTopics
+{
+    public static readonly IPullSubRequestTopic<MoveRequest, MoveResult> Move
+        = PullSubRequestTopic.Create<MoveRequest, MoveResult>("robot/move/request");
+}
+
+// Requester side
+var result = await runtime.RequestAsync(
+    RequestTopics.Move,
+    new MoveRequest { Distance = 1.25f },
+    timeout: TimeSpan.FromSeconds(2));
+
+// Responder side
+await using var responder = await runtime.RespondAsync(
+    RequestTopics.Move,
+    async (request, ct) =>
+    {
+        await robot.MoveAsync(request.Distance, ct);
+        return new MoveResult { Accepted = true };
+    });
+
+// Note:
+// Under QoS 1, a broker can redeliver the same request message.
+// RequestAsync completes once per correlationId, but responder handlers can run multiple times.
+// Keep responder side effects idempotent when using AtLeastOnce.
+
+// Security model (current behavior):
+// - Responder validates replyTo strictly against its own replyTopicPrefix.
+// - Allowed format is "{replyTopicPrefix}/{32-char lowercase hex}" only.
+// - Invalid request envelope / invalid replyTo are dropped without faulting responder subscription.
+// - Remote error text returned to requester is fixed as "Remote handler failed.".
 ```
 
 ---
@@ -308,6 +350,63 @@ var position = new Position
 };
 
 await _client.Runtime.PublishDataAsync(Topics.Position, position);
+```
+
+### 6. Publish from IObservable<T> (Publisher-only helper)
+
+Use `ToPublisher()` to connect any `IObservable<T>` stream to PullSub publish.
+This helper uses `IObservable<T>` / `IObserver<T>` from BCL, so it works with
+R3, UniRx, or System.Reactive streams.
+
+```csharp
+sensorStream
+    .ThrottleFirst(TimeSpan.FromMilliseconds(100))
+    .Subscribe(_client.Runtime.ToPublisher(
+    Topics.Position,
+    onError: ex => Debug.LogError($"Publish failed: {ex.Message}")));
+```
+
+Notes:
+
+- `ToPublisher()` serializes publish calls so that only one publish runs at a time.
+- After source `OnCompleted` / `OnError`, subsequent `OnNext` values are ignored.
+- If `onError` is omitted, publish failures are forwarded to PullSubRuntime logging callbacks.
+- Runtime disposal does not invoke `onError` (treated as graceful termination).
+- If source `OnNext` rate exceeds publish completion rate, pending work can accumulate.
+- Receive-side `ToObservable()` is intentionally not provided by the library.
+    For receive reactive flows, compose from polling (`Update` / `EveryUpdate`) or use Queue API.
+
+### 7. Request-Reply (optional)
+
+Define a request topic once, then use `RequestAsync` from a requester and `RespondAsync` from a responder.
+
+```csharp
+public sealed class AddRequest
+{
+    public int A { get; set; }
+    public int B { get; set; }
+}
+
+public static class RequestTopics
+{
+    public static readonly IPullSubRequestTopic<AddRequest, int> Add
+        = PullSubRequestTopic.Create<AddRequest, int>("math/add/request");
+}
+
+// Requester
+var sum = await _client.Runtime.RequestAsync(
+    RequestTopics.Add,
+    new AddRequest { A = 20, B = 22 },
+    timeout: TimeSpan.FromSeconds(1));
+
+// Responder (runtime or context)
+await _client.Runtime.RespondAsync(
+    RequestTopics.Add,
+    async (req, ct) =>
+    {
+        await Task.Yield();
+        return req.A + req.B;
+    });
 ```
 
 ---
@@ -617,6 +716,14 @@ Always share the same codec between Publisher and Subscriber. Defining the codec
 For class payloads used in Data API, codecs must support in-place decode (`IPayloadInPlaceCodec<T>`).
 Built-in JSON codecs already support this contract.
 
+Request-Reply serialization contract (v1):
+
+- Request/Response payload codec is swappable via `IPullSubRequestTopic<TRequest, TResponse>` (`requestCodec` / `responseCodec`).
+- Request-Reply envelope itself is fixed JSON in v1 (`correlationId`, `replyTo`, `sentUtc`, `deadlineUtc`, `status`, `errorMessage`, `respondedUtc`).
+- For built-in JSON/FlatJson codecs, payload is inlined as `request` / `response` fields.
+- For custom non-JSON codecs, payload is encoded into `requestPayload` / `responsePayload` (base64).
+- Mixed codec definitions on the same request topic are not supported. Share one request topic definition between requester and responder.
+
 ### Notes on Missing Members
 
 - By default, PullSub uses System.Text.Json behavior that serializes/deserializes public properties.
@@ -662,6 +769,10 @@ var connectionOptions = new MqttConnectionOptions(
     transport: new MqttTransportOptions(
         kind: MqttTransportKind.Wss,
         webSocketPath: "/mqtt"));
+
+// Security guard:
+// Transport=Ws with TLS enabled is rejected at MqttConnectionOptions construction time.
+// Use Transport=Wss when TLS is required.
 ```
 
 ### Last Will and Testament (LWT)
@@ -885,6 +996,196 @@ Task<PullSubQueueSubscription> SubscribeQueueAsync<T>(
     CancellationToken ct = default)
 ```
 
+### Request-Reply API
+
+```csharp
+// Define typed request/response topic
+IPullSubRequestTopic<TRequest, TResponse> PullSubRequestTopic.Create<TRequest, TResponse>(
+    string requestTopicName)
+
+IPullSubRequestTopic<TRequest, TResponse> PullSubRequestTopic.Create<TRequest, TResponse>(
+    string requestTopicName,
+    IPayloadCodec<TRequest> requestCodec,
+    IPayloadCodec<TResponse> responseCodec)
+
+// Request from runtime
+Task<TResponse> RequestAsync<TRequest, TResponse>(
+    this PullSubRuntime runtime,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    TRequest request,
+    CancellationToken ct = default)
+
+Task<TResponse> RequestAsync<TRequest, TResponse>(
+    this PullSubRuntime runtime,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    TRequest request,
+    TimeSpan timeout,
+    PullSubQualityOfServiceLevel publishQos = AtLeastOnce,
+    CancellationToken ct = default)
+
+// Request from context
+Task<TResponse> RequestAsync<TRequest, TResponse>(
+    this PullSubContext context,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    TRequest request,
+    CancellationToken ct = default)
+
+Task<TResponse> RequestAsync<TRequest, TResponse>(
+    this PullSubContext context,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    TRequest request,
+    TimeSpan timeout,
+    PullSubQualityOfServiceLevel publishQos = AtLeastOnce,
+    CancellationToken ct = default)
+
+// Respond from runtime
+Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+    this PullSubRuntime runtime,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    Func<TRequest, CancellationToken, ValueTask<TResponse>> handler,
+    CancellationToken ct = default)
+
+Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+    this PullSubRuntime runtime,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    PullSubQueueOptions options,
+    Func<TRequest, CancellationToken, ValueTask<TResponse>> handler,
+    CancellationToken ct = default)
+
+Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+    this PullSubRuntime runtime,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    Func<TRequest, PullSubReplySender<TResponse>, CancellationToken, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+    this PullSubRuntime runtime,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    PullSubQueueOptions options,
+    Func<TRequest, PullSubRequestContext, CancellationToken, ValueTask<TResponse>> handler,
+    CancellationToken ct = default)
+
+Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+    this PullSubRuntime runtime,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    PullSubQueueOptions options,
+    Func<TRequest, PullSubReplySender<TResponse>, CancellationToken, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+    this PullSubRuntime runtime,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    PullSubQueueOptions options,
+    Func<TRequest, PullSubRequestContext, PullSubReplySender<TResponse>, CancellationToken, ValueTask> handler,
+    CancellationToken ct = default)
+
+// Respond from context
+Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+    this PullSubContext context,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    Func<TRequest, CancellationToken, ValueTask<TResponse>> handler,
+    CancellationToken ct = default)
+
+Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+    this PullSubContext context,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    PullSubQueueOptions options,
+    Func<TRequest, CancellationToken, ValueTask<TResponse>> handler,
+    CancellationToken ct = default)
+
+Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+    this PullSubContext context,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    Func<TRequest, PullSubReplySender<TResponse>, CancellationToken, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+    this PullSubContext context,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    PullSubQueueOptions options,
+    Func<TRequest, PullSubRequestContext, CancellationToken, ValueTask<TResponse>> handler,
+    CancellationToken ct = default)
+
+Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+    this PullSubContext context,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    PullSubQueueOptions options,
+    Func<TRequest, PullSubReplySender<TResponse>, CancellationToken, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+    this PullSubContext context,
+    IPullSubRequestTopic<TRequest, TResponse> topic,
+    PullSubQueueOptions options,
+    Func<TRequest, PullSubRequestContext, PullSubReplySender<TResponse>, CancellationToken, ValueTask> handler,
+    CancellationToken ct = default)
+```
+
+Request-Reply notes:
+
+- `StartAsync` must be completed before calling `RequestAsync` / `RespondAsync`.
+- `timeout` is authoritative completion timing for requester.
+- Responder receives `DeadlineUtc` in request envelope as advisory metadata.
+- Convenience responder overloads (`Func<TRequest, ... , ValueTask<TResponse>>`) skip reply publish when the request is already expired after handler execution.
+- One request completes with the first matching response (`CorrelationId`), later duplicates are discarded.
+- If transport disconnects or runtime is disposed while waiting, pending requests fail fast.
+- `PullSubReplySender<TResponse>` is one-shot (`SendAsync` or `SendErrorAsync` once).
+- Sender-based responder overloads are low-level and may propagate handler/send exceptions to Queue subscription completion.
+- Responder validates `replyTo` against its own `replyTopicPrefix` and accepts only `{replyTopicPrefix}/{32-char lowercase hex}`.
+- Uppercase hex, wildcard topics, wrong prefix, and oversized `replyTo` are dropped to keep responder subscriptions alive.
+- Request envelopes are decoded from raw payload. Malformed envelopes are dropped and do not fault responder subscriptions.
+- Inbound oversize payloads are dropped before decode (`MaxInboundPayloadBytes`, default 1 MB).
+- Convenience responder overloads return fixed remote error text (`"Remote handler failed."`) to avoid leaking server internals.
+- Use diagnostics counters (`snapshot.Request.InvalidReplyToDropCount`, `snapshot.InboundOversizeDropCount`) for abuse detection.
+- Prefer `PullSubContext.RespondAsync(...)` for component-scoped lifecycle management; use `PullSubRuntime.RespondAsync(...)` for low-level/manual lifecycle control.
+- For one-way command/event flows (no reply expected), use Queue API with `PublishDataAsync` / `PublishRawAsync` instead of Request-Reply.
+- Reply inbox topic is generated as `{replyTopicPrefix}/{runtime nonce}`. For high-frequency workloads, keep `replyTopicPrefix` short.
+
+Request failure exception:
+
+```csharp
+PullSubRequestException.FailureKind
+
+// enum PullSubRequestFailureKind
+Timeout
+ConnectionLost
+RuntimeDisposed
+SetupFailed
+PublishFailed
+PayloadDecodeFailed
+RemoteError
+```
+
+Runtime request options:
+
+```csharp
+var runtime = new PullSubRuntime(
+    transport,
+    requestOptions: new PullSubRequestOptions(
+        replyTopicPrefix: "pullsub/reply",
+        inboxIdleTimeoutSeconds: 60,
+        replyInboxQueueDepth: 256,
+        maxPendingRequests: 1024));
+```
+
+Runtime guard options (security limits):
+
+```csharp
+var runtime = new PullSubRuntime(
+    transport,
+    runtimeOptions: new PullSubRuntimeOptions(
+        maxInboundPayloadBytes: 1_048_576,
+        maxReplyToLength: 512,
+        maxCorrelationIdLength: 128,
+        invalidReplyToLogInterval: TimeSpan.FromSeconds(60),
+        invalidReplyToAggregateThreshold: 10,
+        inboundOversizeAggregateThreshold: 10,
+        inboundOversizeLogInterval: TimeSpan.FromSeconds(60)));
+```
+
+In Unity Bridge, request options are available under `Request/Reply`.
+Runtime guard currently exposes `MaxInboundPayloadBytes` in inspector (`Runtime Guard`), while other guard values use library defaults.
+
 ### Publish API
 
 ```csharp
@@ -897,6 +1198,13 @@ Task PublishRawAsync(string topic, byte[] payload,
     PullSubQualityOfServiceLevel qos = AtMostOnce,
     bool retain = false,
     CancellationToken ct = default)
+
+IObserver<T> ToPublisher<T>(
+    this PullSubRuntime runtime,
+    IPullSubTopic<T> topic,
+    PullSubQualityOfServiceLevel qos = AtMostOnce,
+    bool retain = false,
+    Action<Exception> onError = null)
 ```
 
 ### PullSubDataHandle\<T\>

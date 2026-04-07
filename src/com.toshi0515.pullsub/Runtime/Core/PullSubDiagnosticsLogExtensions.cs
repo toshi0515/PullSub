@@ -30,7 +30,7 @@ namespace PullSub.Core
             var snapshot = diagnostics.GetSnapshot(maxTopics);
             log(string.Format(
                 CultureInfo.InvariantCulture,
-                "[PullSub.Diagnostics] State={0} Started={1} Connected={2} Ready={3} CapturedAtUtc={4:O} Topics={5} QueueHandlerDiagnostics={6} ReconnectAttempt={7} ReconnectDelayMs={8} ReconnectNextRetryAtUtc={9:O} ReconnectLastFailure={10}",
+                "[PullSub.Diagnostics] State={0} Started={1} Connected={2} Ready={3} CapturedAtUtc={4:O} Topics={5} QueueHandlerDiagnostics={6} InboundOversizeDropped={7} ReconnectAttempt={8} ReconnectDelayMs={9} ReconnectNextRetryAtUtc={10:O} ReconnectLastFailure={11}",
                 snapshot.State,
                 snapshot.IsStarted,
                 snapshot.IsConnected,
@@ -38,6 +38,7 @@ namespace PullSub.Core
                 snapshot.CapturedAtUtc,
                 snapshot.Topics.Length,
                 snapshot.HasQueueHandlerDiagnostics,
+                snapshot.InboundOversizeDropCount,
                 snapshot.Reconnect.AttemptCount,
                 snapshot.Reconnect.CurrentDelay.TotalMilliseconds,
                 snapshot.Reconnect.NextRetryAtUtc,

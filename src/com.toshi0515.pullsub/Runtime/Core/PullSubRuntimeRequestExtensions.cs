@@ -274,13 +274,16 @@ namespace PullSub.Core
 
             var requestEnvelopeCodec = ResolveRequestEnvelopeCodec(topic);
             var responseEnvelopeCodec = ResolveResponseEnvelopeCodec(topic);
-            var requestEnvelopeTopic = ResolveRequestEnvelopeTopic(topic, requestEnvelopeCodec);
+            var requestEnvelopeTopic = ResolveRawRequestEnvelopeTopic(topic);
 
             return runtime.SubscribeQueueAsync(
                 requestEnvelopeTopic,
                 options,
-                async (requestEnvelope, ct) =>
+                async (requestEnvelopePayload, ct) =>
                 {
+                    if (!TryDecodeRequestEnvelope(runtime, requestEnvelopeCodec, requestEnvelopePayload, out var requestEnvelope))
+                        return;
+
                     var requestContext = CreateRequestContext(requestEnvelope);
                     var sender = new PullSubReplySender<TResponse>(
                         requestEnvelope.CorrelationId,
@@ -415,13 +418,16 @@ namespace PullSub.Core
 
             var requestEnvelopeCodec = ResolveRequestEnvelopeCodec(topic);
             var responseEnvelopeCodec = ResolveResponseEnvelopeCodec(topic);
-            var requestEnvelopeTopic = ResolveRequestEnvelopeTopic(topic, requestEnvelopeCodec);
+            var requestEnvelopeTopic = ResolveRawRequestEnvelopeTopic(topic);
 
             return context.SubscribeQueueAsync(
                 requestEnvelopeTopic,
                 options,
-                async (requestEnvelope, ct) =>
+                async (requestEnvelopePayload, ct) =>
                 {
+                    if (!TryDecodeRequestEnvelope(context.Runtime, requestEnvelopeCodec, requestEnvelopePayload, out var requestEnvelope))
+                        return;
+
                     var requestContext = CreateRequestContext(requestEnvelope);
                     var sender = new PullSubReplySender<TResponse>(
                         requestEnvelope.CorrelationId,

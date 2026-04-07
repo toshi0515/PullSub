@@ -474,7 +474,7 @@ namespace PullSub.Editor
                 EditorGUILayout.LabelField("Connection", EditorStyles.boldLabel);
                 EditorGUILayout.LabelField($"ClientId: {connection.ClientIdText} | Policy: {connection.ClientIdPolicy}");
                 DrawReconnectSection(snapshot);
-                DrawRequestSection(snapshot.Request);
+                DrawRequestSection(snapshot.Request, snapshot.InboundOversizeDropCount);
 
                 DrawContextSection(client.GetInstanceID(), snapshot.CapturedAtUtc, view.Topics, view.Contexts);
 
@@ -518,7 +518,7 @@ namespace PullSub.Editor
             EditorGUILayout.LabelField($"  LastFailure: {reason}");
         }
 
-        private static void DrawRequestSection(PullSubPendingRequestStoreDebugSnapshot request)
+        private static void DrawRequestSection(PullSubPendingRequestStoreDebugSnapshot request, long inboundOversizeDropCount)
         {
             EditorGUILayout.Space(4f);
             EditorGUILayout.LabelField("Request/Reply", EditorStyles.boldLabel);
@@ -533,6 +533,11 @@ namespace PullSub.Editor
                 DrawWarningLabel(failures);
             else
                 EditorGUILayout.LabelField(failures);
+
+            if (inboundOversizeDropCount > 0)
+                DrawWarningLabel($"  InboundOversizeDropped={inboundOversizeDropCount}");
+            else
+                EditorGUILayout.LabelField("  InboundOversizeDropped=0");
         }
 
         private static bool HasRequestWarnings(PullSubPendingRequestStoreDebugSnapshot request)

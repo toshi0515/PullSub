@@ -455,6 +455,174 @@ namespace PullSub.Core.Tests.Integration
         }
 
         [Fact]
+        public async Task RespondAsync_ReplyToPrefixMismatch_DropsReplyAndContinues()
+        {
+            var transport = new TestTransport();
+            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/replyto-prefix-mismatch");
+
+            transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
+            {
+                transport.RecordPublished(publishedTopic, payload, qos, retain);
+
+                if (string.Equals(publishedTopic, topic.RequestTopicName, StringComparison.Ordinal))
+                {
+                    var requestCodec = new PullSubRequestEnvelopeCodec<int>(topic.RequestCodec);
+                    var ok = requestCodec.TryDecode(payload, out var requestEnvelope, out _, out var error);
+                    Assert.True(ok, error);
+
+                    if (requestEnvelope.Request == 1)
+                        requestEnvelope.ReplyTo = "other/reply/0123456789abcdef0123456789abcdef";
+
+                    var rewritten = Encode(requestCodec, requestEnvelope);
+                    await transport.EmitMessageAsync(publishedTopic, rewritten);
+                    return;
+                }
+
+                if (publishedTopic.StartsWith("pullsub/reply/", StringComparison.Ordinal))
+                    await transport.EmitMessageAsync(publishedTopic, payload);
+            };
+
+            await using var runtime = new PullSubRuntime(transport);
+            await runtime.StartAsync();
+            await runtime.WaitUntilConnectedAsync();
+
+            await using var responder = await runtime.RespondAsync(
+                topic,
+                (request, ct) => new ValueTask<int>(request + 1));
+
+            var timeout = await Assert.ThrowsAsync<PullSubRequestException>(
+                () => runtime.RequestAsync(topic, 1, TimeSpan.FromMilliseconds(100)));
+            Assert.Equal(PullSubRequestFailureKind.Timeout, timeout.FailureKind);
+            Assert.False(responder.Completion.IsFaulted);
+
+            var snapshot = runtime.GetDiagnostics().GetSnapshot();
+            Assert.Equal(1, snapshot.Request.InvalidReplyToDropCount);
+
+            var response = await runtime.RequestAsync(topic, 2, TimeSpan.FromSeconds(1));
+            Assert.Equal(3, response);
+        }
+
+        [Fact]
+        public async Task RespondAsync_ReplyToUppercaseHex_DropsReplyAndContinues()
+        {
+            var transport = new TestTransport();
+            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/replyto-uppercase-hex");
+
+            transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
+            {
+                transport.RecordPublished(publishedTopic, payload, qos, retain);
+
+                if (string.Equals(publishedTopic, topic.RequestTopicName, StringComparison.Ordinal))
+                {
+                    var requestCodec = new PullSubRequestEnvelopeCodec<int>(topic.RequestCodec);
+                    var ok = requestCodec.TryDecode(payload, out var requestEnvelope, out _, out var error);
+                    Assert.True(ok, error);
+
+                    if (requestEnvelope.Request == 1)
+                        requestEnvelope.ReplyTo = "pullsub/reply/0123456789ABCDEF0123456789ABCDEF";
+
+                    var rewritten = Encode(requestCodec, requestEnvelope);
+                    await transport.EmitMessageAsync(publishedTopic, rewritten);
+                    return;
+                }
+
+                if (publishedTopic.StartsWith("pullsub/reply/", StringComparison.Ordinal))
+                    await transport.EmitMessageAsync(publishedTopic, payload);
+            };
+
+            await using var runtime = new PullSubRuntime(transport);
+            await runtime.StartAsync();
+            await runtime.WaitUntilConnectedAsync();
+
+            await using var responder = await runtime.RespondAsync(
+                topic,
+                (request, ct) => new ValueTask<int>(request + 1));
+
+            var timeout = await Assert.ThrowsAsync<PullSubRequestException>(
+                () => runtime.RequestAsync(topic, 1, TimeSpan.FromMilliseconds(100)));
+            Assert.Equal(PullSubRequestFailureKind.Timeout, timeout.FailureKind);
+            Assert.False(responder.Completion.IsFaulted);
+
+            var snapshot = runtime.GetDiagnostics().GetSnapshot();
+            Assert.Equal(1, snapshot.Request.InvalidReplyToDropCount);
+
+            var response = await runtime.RequestAsync(topic, 2, TimeSpan.FromSeconds(1));
+            Assert.Equal(3, response);
+        }
+
+        [Fact]
+        public async Task RespondAsync_InvalidRequestEnvelope_DoesNotFaultResponderAndContinues()
+        {
+            var transport = new TestTransport();
+            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/invalid-request-envelope");
+            var malformedInjected = 0;
+
+            transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
+            {
+                transport.RecordPublished(publishedTopic, payload, qos, retain);
+
+                if (string.Equals(publishedTopic, topic.RequestTopicName, StringComparison.Ordinal))
+                {
+                    if (Interlocked.CompareExchange(ref malformedInjected, 1, 0) == 0)
+                    {
+                        await transport.EmitMessageAsync(publishedTopic, new byte[] { 0xDE, 0xAD, 0xBE, 0xEF });
+                        return;
+                    }
+
+                    await transport.EmitMessageAsync(publishedTopic, payload);
+                    return;
+                }
+
+                if (publishedTopic.StartsWith("pullsub/reply/", StringComparison.Ordinal))
+                    await transport.EmitMessageAsync(publishedTopic, payload);
+            };
+
+            await using var runtime = new PullSubRuntime(transport);
+            await runtime.StartAsync();
+            await runtime.WaitUntilConnectedAsync();
+
+            await using var responder = await runtime.RespondAsync(
+                topic,
+                (request, ct) => new ValueTask<int>(request + 1));
+
+            var timeout = await Assert.ThrowsAsync<PullSubRequestException>(
+                () => runtime.RequestAsync(topic, 1, TimeSpan.FromMilliseconds(120)));
+            Assert.Equal(PullSubRequestFailureKind.Timeout, timeout.FailureKind);
+            Assert.False(responder.Completion.IsFaulted);
+
+            var response = await runtime.RequestAsync(topic, 2, TimeSpan.FromSeconds(1));
+            Assert.Equal(3, response);
+        }
+
+        [Fact]
+        public async Task RespondAsync_ConvenienceHandler_Exception_UsesFixedRemoteErrorMessage()
+        {
+            var transport = new TestTransport();
+            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/fixed-remote-error");
+
+            transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
+            {
+                transport.RecordPublished(publishedTopic, payload, qos, retain);
+                await transport.EmitMessageAsync(publishedTopic, payload);
+            };
+
+            await using var runtime = new PullSubRuntime(transport);
+            await runtime.StartAsync();
+            await runtime.WaitUntilConnectedAsync();
+
+            await using var responder = await runtime.RespondAsync(
+                topic,
+                (request, ct) => throw new InvalidOperationException("sensitive error detail"));
+
+            var ex = await Assert.ThrowsAsync<PullSubRequestException>(
+                () => runtime.RequestAsync(topic, 1, TimeSpan.FromSeconds(1)));
+
+            Assert.Equal(PullSubRequestFailureKind.RemoteError, ex.FailureKind);
+            Assert.Contains("Remote handler failed.", ex.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("sensitive error detail", ex.Message, StringComparison.Ordinal);
+        }
+
+        [Fact]
         public async Task RequestAsync_CanBeCalledFromContext()
         {
             var transport = new TestTransport();

@@ -185,6 +185,21 @@ namespace PullSub.Bridge
     }
 
     [Serializable]
+    public sealed class PullSubClientRuntimeGuardSettings
+    {
+        [Tooltip("Maximum inbound payload size in bytes. Messages larger than this are dropped before decoding.")]
+        [SerializeField] private int _maxInboundPayloadBytes = PullSubRuntimeOptions.DefaultMaxInboundPayloadBytes;
+
+        public PullSubRuntimeOptions ToCoreOptions()
+        {
+            // Keep replyTo/correlationId limits on library defaults from PullSubRuntimeOptions
+            // to avoid exposing low-level protocol constraints in Inspector.
+            return new PullSubRuntimeOptions(
+                maxInboundPayloadBytes: _maxInboundPayloadBytes);
+        }
+    }
+
+    [Serializable]
     public sealed class PullSubClientConnectionSettings
     {
         [Header("Broker")]
@@ -205,6 +220,9 @@ namespace PullSub.Bridge
 
         [Header("Request/Reply")]
         [SerializeField] private PullSubClientRequestSettings _requestSettings = new PullSubClientRequestSettings();
+
+        [Header("Runtime Guard")]
+        [SerializeField] private PullSubClientRuntimeGuardSettings _runtimeGuardSettings = new PullSubClientRuntimeGuardSettings();
 
         [Header("Transport")]
         [SerializeField] private PullSubClientTransportSettings _transportSettings = new PullSubClientTransportSettings();
@@ -276,6 +294,15 @@ namespace PullSub.Bridge
                 : PullSubRequestOptions.Default;
         }
 
+        public PullSubRuntimeOptions ToRuntimeOptions()
+        {
+            EnsureRuntimeGuardSettings();
+
+            return _runtimeGuardSettings != null
+                ? _runtimeGuardSettings.ToCoreOptions()
+                : PullSubRuntimeOptions.Default;
+        }
+
         internal void MigrateLegacyKeepAliveIfNeeded()
         {
             EnsureKeepAliveSettings();
@@ -332,6 +359,12 @@ namespace PullSub.Bridge
         {
             if (_requestSettings == null)
                 _requestSettings = new PullSubClientRequestSettings();
+        }
+
+        private void EnsureRuntimeGuardSettings()
+        {
+            if (_runtimeGuardSettings == null)
+                _runtimeGuardSettings = new PullSubClientRuntimeGuardSettings();
         }
     }
 }

@@ -51,6 +51,7 @@ namespace PullSub.Core
                 isReady: snapshot.IsReady,
                 capturedAtUtc: snapshot.CapturedAtUtc,
                 hasQueueHandlerDiagnostics: snapshot.HasQueueHandlerDiagnostics,
+                inboundOversizeDropCount: snapshot.InboundOversizeDropCount,
                 reconnect: new PullSubReconnectDiagnostics(
                     attemptCount: snapshot.ReconnectAttemptCount,
                     currentDelay: snapshot.ReconnectCurrentDelay,

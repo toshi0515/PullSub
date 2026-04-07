@@ -9,19 +9,25 @@ namespace PullSub.Core
         private readonly PullSubQueueInbox _rawInbox;
         private readonly Action<string> _logError;
         private readonly Action<Exception> _logException;
+        private readonly PullSubRuntimeOptions _runtimeOptions;
+        private readonly Action<string, int> _onInboundOversizeDrop;
 
         public PullSubMessageDispatcher(
             PullSubSubscriptionRegistry subscriptions,
             TypedDataRegistry typedDataRegistry,
             PullSubQueueInbox rawInbox,
             Action<string> logError,
-            Action<Exception> logException)
+            Action<Exception> logException,
+            PullSubRuntimeOptions runtimeOptions,
+            Action<string, int> onInboundOversizeDrop)
         {
             _subscriptions = subscriptions ?? throw new ArgumentNullException(nameof(subscriptions));
             _typedDataRegistry = typedDataRegistry ?? throw new ArgumentNullException(nameof(typedDataRegistry));
             _rawInbox = rawInbox ?? throw new ArgumentNullException(nameof(rawInbox));
             _logError = logError ?? (_ => { });
             _logException = logException ?? (_ => { });
+            _runtimeOptions = runtimeOptions ?? throw new ArgumentNullException(nameof(runtimeOptions));
+            _onInboundOversizeDrop = onInboundOversizeDrop ?? throw new ArgumentNullException(nameof(onInboundOversizeDrop));
         }
 
         public void Dispatch(string topic, ReadOnlyMemory<byte> payload)
@@ -36,6 +42,12 @@ namespace PullSub.Core
 
                 if (!hasRaw && !hasData)
                     return;
+
+                if (payload.Length > _runtimeOptions.MaxInboundPayloadBytes)
+                {
+                    _onInboundOversizeDrop(topic, payload.Length);
+                    return;
+                }
 
                 if (hasRaw)
                 {

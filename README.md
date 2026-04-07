@@ -139,6 +139,9 @@ var registration = await runtime.SubscribeQueueAsync(
 Use this when you need one response per request, such as command execution acknowledgement,
 query-response operations, or remote validation.
 
+Request-Reply in current PullSub is designed for small/medium RPC payloads with safety guards.
+If you need large blob transfer or stream semantics, prefer Queue/Data APIs or a dedicated file/stream transport.
+
 ```csharp
 public static class RequestTopics
 {
@@ -165,6 +168,12 @@ await using var responder = await runtime.RespondAsync(
 // Under QoS 1, a broker can redeliver the same request message.
 // RequestAsync completes once per correlationId, but responder handlers can run multiple times.
 // Keep responder side effects idempotent when using AtLeastOnce.
+
+// Security model (current behavior):
+// - Responder validates replyTo strictly against its own replyTopicPrefix.
+// - Allowed format is "{replyTopicPrefix}/{32-char lowercase hex}" only.
+// - Invalid request envelope / invalid replyTo are dropped without faulting responder subscription.
+// - Remote error text returned to requester is fixed as "Remote handler failed.".
 ```
 
 ---
@@ -760,6 +769,10 @@ var connectionOptions = new MqttConnectionOptions(
     transport: new MqttTransportOptions(
         kind: MqttTransportKind.Wss,
         webSocketPath: "/mqtt"));
+
+// Security guard:
+// Transport=Ws with TLS enabled is rejected at MqttConnectionOptions construction time.
+// Use Transport=Wss when TLS is required.
 ```
 
 ### Last Will and Testament (LWT)
@@ -1118,7 +1131,12 @@ Request-Reply notes:
 - If transport disconnects or runtime is disposed while waiting, pending requests fail fast.
 - `PullSubReplySender<TResponse>` is one-shot (`SendAsync` or `SendErrorAsync` once).
 - Sender-based responder overloads are low-level and may propagate handler/send exceptions to Queue subscription completion.
-- Invalid responder `replyTo` values (for example wildcard topics) are dropped to keep responder subscriptions alive.
+- Responder validates `replyTo` against its own `replyTopicPrefix` and accepts only `{replyTopicPrefix}/{32-char lowercase hex}`.
+- Uppercase hex, wildcard topics, wrong prefix, and oversized `replyTo` are dropped to keep responder subscriptions alive.
+- Request envelopes are decoded from raw payload. Malformed envelopes are dropped and do not fault responder subscriptions.
+- Inbound oversize payloads are dropped before decode (`MaxInboundPayloadBytes`, default 1 MB).
+- Convenience responder overloads return fixed remote error text (`"Remote handler failed."`) to avoid leaking server internals.
+- Use diagnostics counters (`snapshot.Request.InvalidReplyToDropCount`, `snapshot.InboundOversizeDropCount`) for abuse detection.
 - Prefer `PullSubContext.RespondAsync(...)` for component-scoped lifecycle management; use `PullSubRuntime.RespondAsync(...)` for low-level/manual lifecycle control.
 - For one-way command/event flows (no reply expected), use Queue API with `PublishDataAsync` / `PublishRawAsync` instead of Request-Reply.
 - Reply inbox topic is generated as `{replyTopicPrefix}/{runtime nonce}`. For high-frequency workloads, keep `replyTopicPrefix` short.
@@ -1146,11 +1164,27 @@ var runtime = new PullSubRuntime(
     requestOptions: new PullSubRequestOptions(
         replyTopicPrefix: "pullsub/reply",
         inboxIdleTimeoutSeconds: 60,
-    replyInboxQueueDepth: 256,
+        replyInboxQueueDepth: 256,
         maxPendingRequests: 1024));
 ```
 
-In Unity Bridge, the same settings are available in `PullSubMqttClient` inspector under `Request/Reply`.
+Runtime guard options (security limits):
+
+```csharp
+var runtime = new PullSubRuntime(
+    transport,
+    runtimeOptions: new PullSubRuntimeOptions(
+        maxInboundPayloadBytes: 1_048_576,
+        maxReplyToLength: 512,
+        maxCorrelationIdLength: 128,
+        invalidReplyToLogInterval: TimeSpan.FromSeconds(60),
+        invalidReplyToAggregateThreshold: 10,
+        inboundOversizeAggregateThreshold: 10,
+        inboundOversizeLogInterval: TimeSpan.FromSeconds(60)));
+```
+
+In Unity Bridge, request options are available under `Request/Reply`.
+Runtime guard currently exposes `MaxInboundPayloadBytes` in inspector (`Runtime Guard`), while other guard values use library defaults.
 
 ### Publish API
 

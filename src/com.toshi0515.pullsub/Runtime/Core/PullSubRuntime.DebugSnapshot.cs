@@ -57,6 +57,7 @@ namespace PullSub.Core
             TimeSpan reconnectCurrentDelay,
             DateTime reconnectNextRetryAtUtc,
             string reconnectLastFailureReason,
+            long inboundOversizeDropCount,
             PullSubPendingRequestStoreDebugSnapshot request,
             PullSubRuntimeTopicDebugSnapshot[] topics)
         {
@@ -70,6 +71,7 @@ namespace PullSub.Core
             ReconnectCurrentDelay = reconnectCurrentDelay;
             ReconnectNextRetryAtUtc = reconnectNextRetryAtUtc;
             ReconnectLastFailureReason = reconnectLastFailureReason;
+            InboundOversizeDropCount = inboundOversizeDropCount;
             Request = request;
             Topics = topics;
         }
@@ -84,6 +86,7 @@ namespace PullSub.Core
         public TimeSpan ReconnectCurrentDelay { get; }
         public DateTime ReconnectNextRetryAtUtc { get; }
         public string ReconnectLastFailureReason { get; }
+        public long InboundOversizeDropCount { get; }
         public PullSubPendingRequestStoreDebugSnapshot Request { get; }
         public PullSubRuntimeTopicDebugSnapshot[] Topics { get; }
     }
@@ -161,6 +164,7 @@ namespace PullSub.Core
                 reconnectCurrentDelay,
                 reconnectNextRetryAtUtc,
                 reconnectLastFailureReason,
+                GetInboundOversizeDropCount(),
                 requestSnapshot,
                 topics);
         }

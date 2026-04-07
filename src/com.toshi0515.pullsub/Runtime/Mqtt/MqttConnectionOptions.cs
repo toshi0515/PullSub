@@ -416,13 +416,23 @@ namespace PullSub.Mqtt
             MqttWillOptions will = null,
             MqttTransportOptions transport = null)
         {
+            var resolvedTls = tls ?? MqttTlsOptions.Disabled;
+            var resolvedTransport = transport ?? MqttTransportOptions.TcpDefault;
+
+            if (resolvedTransport.Kind == MqttTransportKind.Ws && resolvedTls.Enabled)
+            {
+                throw new ArgumentException(
+                    "Transport=Ws cannot be used with TLS enabled. Use Transport=Wss when TLS is required.",
+                    nameof(transport));
+            }
+
             Credentials = credentials ?? MqttCredentials.Anonymous;
             KeepAlive = keepAlive ?? MqttKeepAliveOptions.Default;
             ReconnectOptions = reconnectOptions ?? PullSubReconnectOptions.Default;
             UseCleanSession = useCleanSession;
-            Tls = tls ?? MqttTlsOptions.Disabled;
+            Tls = resolvedTls;
             Will = will ?? MqttWillOptions.Disabled;
-            Transport = transport ?? MqttTransportOptions.TcpDefault;
+            Transport = resolvedTransport;
         }
 
         public MqttCredentials Credentials { get; }

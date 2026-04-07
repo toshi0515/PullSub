@@ -21,9 +21,17 @@ namespace PullSub.Core
         private readonly PullSubShutdownCoordinator _shutdownCoordinator;
         private readonly HashSet<string> _networkSubscribedTopics = new HashSet<string>(StringComparer.Ordinal);
         private readonly PullSubRequestOptions _requestOptions;
+        private readonly PullSubRuntimeOptions _runtimeOptions;
         private readonly string _requestRuntimeNonce = Guid.NewGuid().ToString("N");
         private readonly PullSubPendingRequestStore _pendingRequestStore;
         private readonly PullSubReplyInboxLease _replyInboxLease;
+        private readonly object _securityLogGate = new object();
+
+        private long _inboundOversizeDropCount;
+        private long _inboundOversizeDropBurstCount;
+        private DateTime _inboundOversizeLastLogUtc;
+        private long _invalidReplyToDropBurstCount;
+        private DateTime _invalidReplyToLastLogUtc;
 
         private readonly Action<string> _log;
         private readonly Action<string> _logWarning;
@@ -49,7 +57,8 @@ namespace PullSub.Core
             Action<string> logWarning = null,
             Action<string> logError = null,
             Action<Exception> logException = null,
-            PullSubRequestOptions requestOptions = null)
+            PullSubRequestOptions requestOptions = null,
+            PullSubRuntimeOptions runtimeOptions = null)
         {
             _transport = transport ?? throw new ArgumentNullException(nameof(transport));
             _log = log ?? (_ => { });
@@ -57,6 +66,7 @@ namespace PullSub.Core
             _logError = logError ?? (_ => { });
             _logException = logException ?? (_ => { });
             _requestOptions = requestOptions ?? PullSubRequestOptions.Default;
+            _runtimeOptions = runtimeOptions ?? PullSubRuntimeOptions.Default;
             _pendingRequestStore = new PullSubPendingRequestStore(
                 _requestOptions.MaxPendingRequests,
                 _ => { });
@@ -66,14 +76,18 @@ namespace PullSub.Core
                 _pendingRequestStore,
                 _requestOptions.InboxIdleTimeout,
                 new PullSubQueueOptions(_requestOptions.ReplyInboxQueueDepth),
-                _logException);
+                _logException,
+                _runtimeOptions,
+                MarkInboundOversizeDrop);
             _shutdownCoordinator = new PullSubShutdownCoordinator(_logError);
             _messageDispatcher = new PullSubMessageDispatcher(
                 _subscriptions,
                 _typedDataRegistry,
                 _rawInbox,
                 _logError,
-                _logException);
+                _logException,
+                _runtimeOptions,
+                MarkInboundOversizeDrop);
 
             _transport.SetCallbacks(
                 HandleConnectedAsync,
@@ -82,6 +96,7 @@ namespace PullSub.Core
         }
 
         public PullSubRequestOptions RequestOptions => _requestOptions;
+        public PullSubRuntimeOptions RuntimeOptions => _runtimeOptions;
         internal string ReplyInboxTopic => _replyInboxLease.Topic;
         internal bool IsReplyInboxSubscribed => _replyInboxLease.IsSubscribed;
 
@@ -127,9 +142,99 @@ namespace PullSub.Core
             _pendingRequestStore.MarkSetupFailure();
         }
 
-        internal void MarkInvalidReplyToDrop()
+        internal void MarkInvalidReplyToDrop(string replyTo = null)
         {
-            _pendingRequestStore.MarkInvalidReplyToDrop();
+            var totalDropCount = _pendingRequestStore.MarkInvalidReplyToDrop();
+            var now = DateTime.UtcNow;
+
+            if (totalDropCount == 1)
+            {
+                lock (_securityLogGate)
+                {
+                    _invalidReplyToLastLogUtc = now;
+                    Interlocked.Exchange(ref _invalidReplyToDropBurstCount, 0);
+                }
+
+                _logWarning(
+                    $"[PullSubRuntime] Dropped invalid replyTo. replyTo='{replyTo ?? string.Empty}' " +
+                    $"expectedPrefix='{_requestOptions.ReplyTopicPrefix}'.");
+                return;
+            }
+
+            Interlocked.Increment(ref _invalidReplyToDropBurstCount);
+
+            if (_runtimeOptions.InvalidReplyToLogInterval <= TimeSpan.Zero)
+                return;
+
+            if (Volatile.Read(ref _invalidReplyToDropBurstCount) < _runtimeOptions.InvalidReplyToAggregateThreshold)
+                return;
+
+            long burstToReport;
+            lock (_securityLogGate)
+            {
+                if (now - _invalidReplyToLastLogUtc < _runtimeOptions.InvalidReplyToLogInterval)
+                    return;
+
+                burstToReport = Interlocked.Exchange(ref _invalidReplyToDropBurstCount, 0);
+                _invalidReplyToLastLogUtc = now;
+            }
+
+            if (burstToReport > 0)
+            {
+                _logWarning(
+                    $"[PullSubRuntime] Dropped invalid replyTo in aggregate. " +
+                    $"count={burstToReport} total={totalDropCount} expectedPrefix='{_requestOptions.ReplyTopicPrefix}'.");
+            }
+        }
+
+        internal void MarkInboundOversizeDrop(string topic, int payloadLength)
+        {
+            var totalDropCount = Interlocked.Increment(ref _inboundOversizeDropCount);
+            var now = DateTime.UtcNow;
+
+            if (totalDropCount == 1)
+            {
+                lock (_securityLogGate)
+                {
+                    _inboundOversizeLastLogUtc = now;
+                    Interlocked.Exchange(ref _inboundOversizeDropBurstCount, 0);
+                }
+
+                _logWarning(
+                    $"[PullSubRuntime] Dropped inbound oversize payload. topic='{topic}' " +
+                    $"sizeBytes={payloadLength} limitBytes={_runtimeOptions.MaxInboundPayloadBytes}.");
+                return;
+            }
+
+            Interlocked.Increment(ref _inboundOversizeDropBurstCount);
+
+            if (_runtimeOptions.InboundOversizeLogInterval <= TimeSpan.Zero)
+                return;
+
+            if (Volatile.Read(ref _inboundOversizeDropBurstCount) < _runtimeOptions.InboundOversizeAggregateThreshold)
+                return;
+
+            long burstToReport;
+            lock (_securityLogGate)
+            {
+                if (now - _inboundOversizeLastLogUtc < _runtimeOptions.InboundOversizeLogInterval)
+                    return;
+
+                burstToReport = Interlocked.Exchange(ref _inboundOversizeDropBurstCount, 0);
+                _inboundOversizeLastLogUtc = now;
+            }
+
+            if (burstToReport > 0)
+            {
+                _logWarning(
+                    $"[PullSubRuntime] Dropped inbound oversize payloads in aggregate. " +
+                    $"count={burstToReport} total={totalDropCount} limitBytes={_runtimeOptions.MaxInboundPayloadBytes}.");
+            }
+        }
+
+        internal long GetInboundOversizeDropCount()
+        {
+            return Interlocked.Read(ref _inboundOversizeDropCount);
         }
 
         internal void FailRequestPublish(string correlationId, Exception exception)
@@ -156,6 +261,14 @@ namespace PullSub.Core
                 return;
 
             _logException(exception);
+        }
+
+        internal void LogWarning(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+                return;
+
+            _logWarning(message);
         }
 
         internal PullSubRequestFailureKind ClassifyPublishFailure()

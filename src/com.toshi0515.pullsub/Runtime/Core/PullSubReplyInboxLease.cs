@@ -13,6 +13,8 @@ namespace PullSub.Core
         private readonly PullSubQueueOptions _replyQueueOptions;
         private readonly SemaphoreSlim _gate = new SemaphoreSlim(1, 1);
         private readonly Action<Exception> _logException;
+        private readonly PullSubRuntimeOptions _runtimeOptions;
+        private readonly Action<string, int> _onInboundOversizeDrop;
 
         private readonly object _timerGate = new object();
         private CancellationTokenSource _idleTimerCts;
@@ -26,7 +28,9 @@ namespace PullSub.Core
             PullSubPendingRequestStore pendingStore,
             TimeSpan idleTimeout,
             PullSubQueueOptions replyQueueOptions,
-            Action<Exception> logException)
+            Action<Exception> logException,
+            PullSubRuntimeOptions runtimeOptions,
+            Action<string, int> onInboundOversizeDrop)
         {
             if (runtime == null)
                 throw new ArgumentNullException(nameof(runtime));
@@ -43,11 +47,19 @@ namespace PullSub.Core
             if (replyQueueOptions == null)
                 throw new ArgumentNullException(nameof(replyQueueOptions));
 
+            if (runtimeOptions == null)
+                throw new ArgumentNullException(nameof(runtimeOptions));
+
+            if (onInboundOversizeDrop == null)
+                throw new ArgumentNullException(nameof(onInboundOversizeDrop));
+
             _runtime = runtime;
             _pendingStore = pendingStore;
             _idleTimeout = idleTimeout;
             _replyQueueOptions = replyQueueOptions;
             _logException = logException ?? (_ => { });
+            _runtimeOptions = runtimeOptions;
+            _onInboundOversizeDrop = onInboundOversizeDrop;
             _replyTopic = PullSubTopic.Create(
                 replyTopic,
                 PullSubRawBinaryPayloadCodec.Default);
@@ -125,6 +137,14 @@ namespace PullSub.Core
 
         private ValueTask HandleReplyAsync(byte[] responseEnvelopePayload, CancellationToken cancellationToken)
         {
+            // Defense in depth: dispatcher should already drop oversize payloads,
+            // but keep this local guard in case future routing paths bypass dispatcher checks.
+            if (responseEnvelopePayload != null && responseEnvelopePayload.Length > _runtimeOptions.MaxInboundPayloadBytes)
+            {
+                _onInboundOversizeDrop(Topic, responseEnvelopePayload.Length);
+                return default;
+            }
+
             if (!PullSubResponseEnvelopeCodec<byte[]>.TryReadCorrelationId(responseEnvelopePayload, out var correlationId, out _))
                 return default;
 

@@ -207,11 +207,12 @@ namespace PullSub.Core
             }
         }
 
-        public void MarkInvalidReplyToDrop()
+        public long MarkInvalidReplyToDrop()
         {
             lock (_gate)
             {
                 _invalidReplyToDropCount++;
+                return _invalidReplyToDropCount;
             }
         }
 

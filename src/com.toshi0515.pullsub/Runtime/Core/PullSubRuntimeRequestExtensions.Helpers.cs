@@ -34,14 +34,10 @@ namespace PullSub.Core
             return new PullSubResponseEnvelopeCodec<TResponse>(topic.ResponseCodec);
         }
 
-        private static IPullSubTopic<PullSubRequestEnvelope<TRequest>> ResolveRequestEnvelopeTopic<TRequest, TResponse>(
-            IPullSubRequestTopic<TRequest, TResponse> topic,
-            PullSubRequestEnvelopeCodec<TRequest> requestEnvelopeCodec)
+        private static IPullSubTopic<byte[]> ResolveRawRequestEnvelopeTopic<TRequest, TResponse>(
+            IPullSubRequestTopic<TRequest, TResponse> topic)
         {
-            if (topic is IPullSubRequestTopicInternal<TRequest, TResponse> internalTopic)
-                return internalTopic.RequestEnvelopeTopic;
-
-            return PullSubTopic.Create(topic.RequestTopicName, requestEnvelopeCodec);
+            return PullSubTopic.Create(topic.RequestTopicName, PullSubRawBinaryPayloadCodec.Default);
         }
 
         private static byte[] EncodePayload<T>(IPayloadCodec<T> codec, DateTime timestampUtc, T value)
@@ -61,20 +57,18 @@ namespace PullSub.Core
             PullSubResponseEnvelopeCodec<TResponse> responseEnvelopeCodec,
             CancellationToken cancellationToken)
         {
-            try
+            if (!IsAllowedReplyTo(runtime, replyTo))
             {
-                PullSubSubscriptionRegistry.ValidateExactMatchTopic(replyTo);
-            }
-            catch (PullSubWildcardTopicNotSupportedException ex)
-            {
-                runtime.MarkInvalidReplyToDrop();
-                runtime.LogException(ex);
+                runtime.MarkInvalidReplyToDrop(replyTo);
                 return Task.CompletedTask;
             }
-            catch (ArgumentException ex)
+
+            if (string.IsNullOrWhiteSpace(responseEnvelope.CorrelationId)
+                || responseEnvelope.CorrelationId.Length > runtime.RuntimeOptions.MaxCorrelationIdLength)
             {
-                runtime.MarkInvalidReplyToDrop();
-                runtime.LogException(ex);
+                runtime.LogWarning(
+                    $"[PullSubRuntime] Dropped reply with invalid correlationId length. " +
+                    $"max={runtime.RuntimeOptions.MaxCorrelationIdLength}.");
                 return Task.CompletedTask;
             }
 
@@ -88,15 +82,89 @@ namespace PullSub.Core
                 cancellationToken);
         }
 
+        private static bool TryDecodeRequestEnvelope<TRequest>(
+            PullSubRuntime runtime,
+            PullSubRequestEnvelopeCodec<TRequest> requestEnvelopeCodec,
+            byte[] requestEnvelopePayload,
+            out PullSubRequestEnvelope<TRequest> requestEnvelope)
+        {
+            requestEnvelope = default;
+
+            if (!requestEnvelopeCodec.TryDecode(requestEnvelopePayload, out requestEnvelope, out _, out var decodeError))
+            {
+                runtime.LogWarning($"[PullSubRuntime] Dropped invalid request envelope. error={decodeError}");
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(requestEnvelope.CorrelationId)
+                || requestEnvelope.CorrelationId.Length > runtime.RuntimeOptions.MaxCorrelationIdLength)
+            {
+                runtime.LogWarning(
+                    $"[PullSubRuntime] Dropped request with invalid correlationId length. " +
+                    $"max={runtime.RuntimeOptions.MaxCorrelationIdLength}");
+                return false;
+            }
+
+            if (!IsAllowedReplyTo(runtime, requestEnvelope.ReplyTo))
+            {
+                runtime.MarkInvalidReplyToDrop(requestEnvelope.ReplyTo);
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool IsAllowedReplyTo(PullSubRuntime runtime, string replyTo)
+        {
+            if (runtime == null)
+                return false;
+
+            if (string.IsNullOrWhiteSpace(replyTo))
+                return false;
+
+            if (replyTo.Length > runtime.RuntimeOptions.MaxReplyToLength)
+                return false;
+
+            try
+            {
+                PullSubSubscriptionRegistry.ValidateExactMatchTopic(replyTo);
+            }
+            catch (PullSubWildcardTopicNotSupportedException)
+            {
+                return false;
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+
+            var normalizedPrefix = runtime.RequestOptions.ReplyTopicPrefix.TrimEnd('/');
+            if (normalizedPrefix.Length == 0)
+                return false;
+
+            var expectedPrefix = normalizedPrefix + "/";
+            if (!replyTo.StartsWith(expectedPrefix, StringComparison.Ordinal))
+                return false;
+
+            var suffix = replyTo.AsSpan(expectedPrefix.Length);
+            if (suffix.Length != 32)
+                return false;
+
+            for (var i = 0; i < suffix.Length; i++)
+            {
+                var c = suffix[i];
+                var isDigit = c >= '0' && c <= '9';
+                var isLowerHex = c >= 'a' && c <= 'f';
+                if (!isDigit && !isLowerHex)
+                    return false;
+            }
+
+            return true;
+        }
+
         private static string FormatRemoteErrorMessage(Exception exception)
         {
-            if (exception == null)
-                return "Unknown remote error.";
-
-            var typeName = exception.GetType().Name;
-            return string.IsNullOrWhiteSpace(exception.Message)
-                ? typeName
-                : $"{typeName}: {exception.Message}";
+            return "Remote handler failed.";
         }
 
         private static Func<TRequest, PullSubRequestContext, PullSubReplySender<TResponse>, CancellationToken, ValueTask>

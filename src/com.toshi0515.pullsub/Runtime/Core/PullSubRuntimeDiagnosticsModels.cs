@@ -107,6 +107,7 @@ namespace PullSub.Core
             bool isReady,
             DateTime capturedAtUtc,
             bool hasQueueHandlerDiagnostics,
+            long inboundOversizeDropCount,
             PullSubReconnectDiagnostics reconnect,
             PullSubRequestDiagnostics request,
             PullSubTopicDiagnostics[] topics)
@@ -117,6 +118,7 @@ namespace PullSub.Core
             IsReady = isReady;
             CapturedAtUtc = capturedAtUtc;
             HasQueueHandlerDiagnostics = hasQueueHandlerDiagnostics;
+            InboundOversizeDropCount = inboundOversizeDropCount;
             Reconnect = reconnect;
             Request = request;
             Topics = topics ?? Array.Empty<PullSubTopicDiagnostics>();
@@ -128,6 +130,7 @@ namespace PullSub.Core
         public bool IsReady { get; }
         public DateTime CapturedAtUtc { get; }
         public bool HasQueueHandlerDiagnostics { get; }
+        public long InboundOversizeDropCount { get; }
         public PullSubReconnectDiagnostics Reconnect { get; }
         public PullSubRequestDiagnostics Request { get; }
         public PullSubTopicDiagnostics[] Topics { get; }
