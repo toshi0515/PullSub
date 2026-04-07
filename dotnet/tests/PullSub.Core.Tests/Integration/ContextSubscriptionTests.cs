@@ -62,8 +62,8 @@ namespace PullSub.Core.Tests.Integration
             var task1 = context.SubscribeDataAsync(topic);
             var task2 = context.SubscribeDataAsync(topic);
 
-            PullSubDataHandle<SampleClassPayload>? subscription1 = null;
-            PullSubDataHandle<SampleClassPayload>? subscription2 = null;
+            DataSubscription<SampleClassPayload>? subscription1 = null;
+            DataSubscription<SampleClassPayload>? subscription2 = null;
             Exception? exception1 = null;
             Exception? exception2 = null;
 
@@ -122,7 +122,7 @@ namespace PullSub.Core.Tests.Integration
 
             var registration = await runtime.SubscribeQueueAsync(
                 "test/context/queue-idempotent-unsubscribe",
-                PullSubQueueOptions.Default,
+                QueueOptions.Default,
                 static _ => { });
 
             var first = await registration.UnsubscribeAsync();

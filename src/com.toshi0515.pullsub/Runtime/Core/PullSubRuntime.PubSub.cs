@@ -15,7 +15,7 @@ namespace PullSub.Core
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
-            PullSubSubscriptionRegistry.ValidateExactMatchTopic(topic);
+            SubscriptionRegistry.ValidateExactMatchTopic(topic);
 
             if (payload == null)
                 throw new ArgumentNullException(nameof(payload));
@@ -45,7 +45,7 @@ namespace PullSub.Core
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
-            PullSubSubscriptionRegistry.ValidateExactMatchTopic(topic);
+            SubscriptionRegistry.ValidateExactMatchTopic(topic);
 
             if (codec == null)
                 throw new ArgumentNullException(nameof(codec));
@@ -65,7 +65,7 @@ namespace PullSub.Core
 
         public async Task SubscribeQueueAsync(
             string topic,
-            PullSubQueueOptions options,
+            QueueOptions options,
             PullSubQualityOfServiceLevel subscribeQos = PullSubQualityOfServiceLevel.AtLeastOnce,
             CancellationToken cancellationToken = default)
         {
@@ -73,7 +73,7 @@ namespace PullSub.Core
             if (options == null)
                 throw new ArgumentNullException(nameof(options));
 
-            PullSubSubscriptionRegistry.ValidateExactMatchTopic(topic);
+            SubscriptionRegistry.ValidateExactMatchTopic(topic);
             var operationToken = CreateOperationToken(cancellationToken, out var linkedCts);
 
             try
@@ -141,7 +141,7 @@ namespace PullSub.Core
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
-            PullSubSubscriptionRegistry.ValidateExactMatchTopic(topic);
+            SubscriptionRegistry.ValidateExactMatchTopic(topic);
 
             if (codec == null)
                 throw new ArgumentNullException(nameof(codec));
@@ -199,7 +199,7 @@ namespace PullSub.Core
         public async Task UnsubscribeQueueAsync(string topic, CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
-            PullSubSubscriptionRegistry.ValidateExactMatchTopic(topic);
+            SubscriptionRegistry.ValidateExactMatchTopic(topic);
             var operationToken = CreateOperationToken(cancellationToken, out var linkedCts);
 
             try
@@ -233,7 +233,7 @@ namespace PullSub.Core
         public async Task UnsubscribeDataAsync(string topic, CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
-            PullSubSubscriptionRegistry.ValidateExactMatchTopic(topic);
+            SubscriptionRegistry.ValidateExactMatchTopic(topic);
             var operationToken = CreateOperationToken(cancellationToken, out var linkedCts);
 
             try

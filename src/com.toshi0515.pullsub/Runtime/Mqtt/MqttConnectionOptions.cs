@@ -319,7 +319,7 @@ namespace PullSub.Mqtt
                 throw new ArgumentOutOfRangeException(nameof(qos));
 
             if (enabled)
-                PullSubTopicValidator.ValidateExactMatchTopic(topic);
+                TopicValidator.ValidateExactMatchTopic(topic);
 
             Enabled = enabled;
             Topic = enabled ? topic : null;
@@ -380,7 +380,7 @@ namespace PullSub.Mqtt
             : this(
                 credentials,
                 new MqttKeepAliveOptions(enabled: true, seconds: keepAliveSeconds),
-                PullSubReconnectOptions.FromInitialDelaySeconds(reconnectDelaySeconds),
+                ReconnectOptions.FromInitialDelaySeconds(reconnectDelaySeconds),
                 useCleanSession,
                 tls,
                 will,
@@ -399,7 +399,7 @@ namespace PullSub.Mqtt
             : this(
                 credentials,
                 keepAlive,
-                PullSubReconnectOptions.FromInitialDelaySeconds(reconnectDelaySeconds),
+                ReconnectOptions.FromInitialDelaySeconds(reconnectDelaySeconds),
                 useCleanSession,
                 tls,
                 will,
@@ -410,7 +410,7 @@ namespace PullSub.Mqtt
         public MqttConnectionOptions(
             MqttCredentials credentials,
             MqttKeepAliveOptions keepAlive,
-            PullSubReconnectOptions reconnectOptions,
+            ReconnectOptions reconnectOptions,
             bool useCleanSession = true,
             MqttTlsOptions tls = null,
             MqttWillOptions will = null,
@@ -428,7 +428,7 @@ namespace PullSub.Mqtt
 
             Credentials = credentials ?? MqttCredentials.Anonymous;
             KeepAlive = keepAlive ?? MqttKeepAliveOptions.Default;
-            ReconnectOptions = reconnectOptions ?? PullSubReconnectOptions.Default;
+            ReconnectOptions = reconnectOptions ?? ReconnectOptions.Default;
             UseCleanSession = useCleanSession;
             Tls = resolvedTls;
             Will = will ?? MqttWillOptions.Disabled;
@@ -438,7 +438,7 @@ namespace PullSub.Mqtt
         public MqttCredentials Credentials { get; }
         public MqttKeepAliveOptions KeepAlive { get; }
         public int KeepAliveSeconds => KeepAlive.Enabled ? KeepAlive.Seconds : 0;
-        public PullSubReconnectOptions ReconnectOptions { get; }
+        public ReconnectOptions ReconnectOptions { get; }
         public int ReconnectDelaySeconds => Math.Max(1, (int)Math.Round(ReconnectOptions.InitialDelay.TotalSeconds));
         public bool UseCleanSession { get; }
         public MqttTlsOptions Tls { get; }

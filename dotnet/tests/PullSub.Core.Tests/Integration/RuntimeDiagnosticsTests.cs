@@ -90,7 +90,7 @@ namespace PullSub.Core.Tests.Integration
 
             await runtime.StartAsync();
             await runtime.WaitUntilConnectedAsync();
-            await runtime.SubscribeQueueAsync(topic, PullSubQueueOptions.Default);
+            await runtime.SubscribeQueueAsync(topic, QueueOptions.Default);
 
             await transport.EmitMessageAsync(topic, new byte[32]);
 

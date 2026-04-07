@@ -58,7 +58,7 @@ namespace PullSub.Core
             DateTime reconnectNextRetryAtUtc,
             string reconnectLastFailureReason,
             long inboundOversizeDropCount,
-            PullSubPendingRequestStoreDebugSnapshot request,
+            PendingRequestStoreDebugSnapshot request,
             PullSubRuntimeTopicDebugSnapshot[] topics)
         {
             State = state;
@@ -87,7 +87,7 @@ namespace PullSub.Core
         public DateTime ReconnectNextRetryAtUtc { get; }
         public string ReconnectLastFailureReason { get; }
         public long InboundOversizeDropCount { get; }
-        public PullSubPendingRequestStoreDebugSnapshot Request { get; }
+        public PendingRequestStoreDebugSnapshot Request { get; }
         public PullSubRuntimeTopicDebugSnapshot[] Topics { get; }
     }
 

@@ -85,7 +85,7 @@ namespace PullSub.Core.IntegrationTests
         private async Task<PerfRunResult> RunScenarioAsync(PerfScenario scenario, int runIndex, PullSubQualityOfServiceLevel qos)
         {
             var topic = $"pullsub/perf/{scenario.ToString().ToLowerInvariant()}/{Guid.NewGuid():N}";
-            var codec = PullSubJsonPayloadCodec<Phase0PerfDataPayload>.Default;
+            var codec = JsonPayloadCodec<Phase0PerfDataPayload>.Default;
 
             var options = MqttConnectionOptions.Default;
             await using var subscriberTransport = new MqttTransport(BrokerHost, BrokerPort, options);
@@ -102,7 +102,7 @@ namespace PullSub.Core.IntegrationTests
             await publisherRuntime.WaitUntilConnectedAsync(ct);
 
             if (scenario is PerfScenario.RawOnly or PerfScenario.Mixed)
-                await subscriberRuntime.SubscribeQueueAsync(topic, new PullSubQueueOptions(RawQueueDepth), qos, ct);
+                await subscriberRuntime.SubscribeQueueAsync(topic, new QueueOptions(RawQueueDepth), qos, ct);
 
             if (scenario is PerfScenario.DataOnly or PerfScenario.Mixed)
                 await subscriberRuntime.SubscribeDataAsync(topic, codec, qos, ct);
@@ -118,7 +118,7 @@ namespace PullSub.Core.IntegrationTests
                 {
                     for (var i = 0; i < MessagesPerRun; i++)
                     {
-                        PullSubQueueMessage msg;
+                        QueueMessage msg;
                         try
                         {
                             msg = await subscriberRuntime.ReceiveQueueAsync(topic, ct);

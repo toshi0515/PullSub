@@ -11,7 +11,7 @@ namespace PullSub.Core
 
         public static Task<TResponse> RequestAsync<TRequest, TResponse>(
             this PullSubRuntime runtime,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
+            IRequestTopic<TRequest, TResponse> topic,
             TRequest request,
             CancellationToken cancellationToken = default)
         {
@@ -26,7 +26,7 @@ namespace PullSub.Core
 
         public static async Task<TResponse> RequestAsync<TRequest, TResponse>(
             this PullSubRuntime runtime,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
+            IRequestTopic<TRequest, TResponse> topic,
             TRequest request,
             TimeSpan timeout,
             PullSubQualityOfServiceLevel publishQos = PullSubQualityOfServiceLevel.AtLeastOnce,
@@ -66,7 +66,7 @@ namespace PullSub.Core
             }
 
             var pending = runtime.RegisterPendingRequest(correlationId, deadlineUtc, cancellationToken);
-            var requestEnvelope = new PullSubRequestEnvelope<TRequest>
+            var requestEnvelope = new RequestEnvelope<TRequest>
             {
                 CorrelationId = correlationId,
                 ReplyTo = runtime.ReplyInboxTopic,
@@ -109,7 +109,7 @@ namespace PullSub.Core
                     correlationId);
             }
 
-            if (responseEnvelope.Status == PullSubResponseEnvelopeStatus.RemoteError)
+            if (responseEnvelope.Status == ResponseEnvelopeStatus.RemoteError)
             {
                 throw new PullSubRequestException(
                     PullSubRequestFailureKind.RemoteError,
@@ -121,8 +121,8 @@ namespace PullSub.Core
         }
 
         public static Task<TResponse> RequestAsync<TRequest, TResponse>(
-            this PullSubContext context,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
+            this CompositeSubscription context,
+            IRequestTopic<TRequest, TResponse> topic,
             TRequest request,
             CancellationToken cancellationToken = default)
         {
@@ -133,8 +133,8 @@ namespace PullSub.Core
         }
 
         public static Task<TResponse> RequestAsync<TRequest, TResponse>(
-            this PullSubContext context,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
+            this CompositeSubscription context,
+            IRequestTopic<TRequest, TResponse> topic,
             TRequest request,
             TimeSpan timeout,
             PullSubQualityOfServiceLevel publishQos = PullSubQualityOfServiceLevel.AtLeastOnce,
@@ -146,34 +146,34 @@ namespace PullSub.Core
             return context.Runtime.RequestAsync(topic, request, timeout, publishQos, cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
             this PullSubRuntime runtime,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
+            IRequestTopic<TRequest, TResponse> topic,
             Func<TRequest, CancellationToken, ValueTask<TResponse>> handler,
             CancellationToken cancellationToken = default)
         {
             return RespondAsync(
                 runtime,
                 topic,
-                PullSubQueueOptions.Default,
+                QueueOptions.Default,
                 handler,
                 cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
             this PullSubRuntime runtime,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
-            Func<TRequest, PullSubRequestContext, CancellationToken, ValueTask<TResponse>> handler,
+            IRequestTopic<TRequest, TResponse> topic,
+            Func<TRequest, RequestContext, CancellationToken, ValueTask<TResponse>> handler,
             CancellationToken cancellationToken = default)
         {
-            return RespondAsync(runtime, topic, PullSubQueueOptions.Default, handler, cancellationToken);
+            return RespondAsync(runtime, topic, QueueOptions.Default, handler, cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
             this PullSubRuntime runtime,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
-            PullSubQueueOptions options,
-            Func<TRequest, PullSubRequestContext, CancellationToken, ValueTask<TResponse>> handler,
+            IRequestTopic<TRequest, TResponse> topic,
+            QueueOptions options,
+            Func<TRequest, RequestContext, CancellationToken, ValueTask<TResponse>> handler,
             CancellationToken cancellationToken = default)
         {
             if (handler == null)
@@ -187,10 +187,10 @@ namespace PullSub.Core
                 cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
             this PullSubRuntime runtime,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
-            PullSubQueueOptions options,
+            IRequestTopic<TRequest, TResponse> topic,
+            QueueOptions options,
             Func<TRequest, CancellationToken, ValueTask<TResponse>> handler,
             CancellationToken cancellationToken = default)
         {
@@ -205,20 +205,20 @@ namespace PullSub.Core
                 cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
             this PullSubRuntime runtime,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
-            Func<TRequest, PullSubReplySender<TResponse>, CancellationToken, ValueTask> handler,
+            IRequestTopic<TRequest, TResponse> topic,
+            Func<TRequest, ReplySender<TResponse>, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
-            return RespondAsync(runtime, topic, PullSubQueueOptions.Default, handler, cancellationToken);
+            return RespondAsync(runtime, topic, QueueOptions.Default, handler, cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
             this PullSubRuntime runtime,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
-            PullSubQueueOptions options,
-            Func<TRequest, PullSubReplySender<TResponse>, CancellationToken, ValueTask> handler,
+            IRequestTopic<TRequest, TResponse> topic,
+            QueueOptions options,
+            Func<TRequest, ReplySender<TResponse>, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
             if (runtime == null)
@@ -244,20 +244,20 @@ namespace PullSub.Core
                 cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
             this PullSubRuntime runtime,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
-            Func<TRequest, PullSubRequestContext, PullSubReplySender<TResponse>, CancellationToken, ValueTask> handler,
+            IRequestTopic<TRequest, TResponse> topic,
+            Func<TRequest, RequestContext, ReplySender<TResponse>, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
-            return RespondAsync(runtime, topic, PullSubQueueOptions.Default, handler, cancellationToken);
+            return RespondAsync(runtime, topic, QueueOptions.Default, handler, cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
             this PullSubRuntime runtime,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
-            PullSubQueueOptions options,
-            Func<TRequest, PullSubRequestContext, PullSubReplySender<TResponse>, CancellationToken, ValueTask> handler,
+            IRequestTopic<TRequest, TResponse> topic,
+            QueueOptions options,
+            Func<TRequest, RequestContext, ReplySender<TResponse>, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
             if (runtime == null)
@@ -285,7 +285,7 @@ namespace PullSub.Core
                         return;
 
                     var requestContext = CreateRequestContext(requestEnvelope);
-                    var sender = new PullSubReplySender<TResponse>(
+                    var sender = new ReplySender<TResponse>(
                         requestEnvelope.CorrelationId,
                         (responseEnvelope, sendCt) =>
                             PublishReplyAsync(runtime, requestEnvelope.ReplyTo, responseEnvelope, responseEnvelopeCodec, sendCt));
@@ -295,19 +295,19 @@ namespace PullSub.Core
                 cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
-            this PullSubContext context,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
+            this CompositeSubscription context,
+            IRequestTopic<TRequest, TResponse> topic,
             Func<TRequest, CancellationToken, ValueTask<TResponse>> handler,
             CancellationToken cancellationToken = default)
         {
-            return RespondAsync(context, topic, PullSubQueueOptions.Default, handler, cancellationToken);
+            return RespondAsync(context, topic, QueueOptions.Default, handler, cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
-            this PullSubContext context,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
-            PullSubQueueOptions options,
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
+            this CompositeSubscription context,
+            IRequestTopic<TRequest, TResponse> topic,
+            QueueOptions options,
             Func<TRequest, CancellationToken, ValueTask<TResponse>> handler,
             CancellationToken cancellationToken = default)
         {
@@ -322,20 +322,20 @@ namespace PullSub.Core
                 cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
-            this PullSubContext context,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
-            Func<TRequest, PullSubRequestContext, CancellationToken, ValueTask<TResponse>> handler,
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
+            this CompositeSubscription context,
+            IRequestTopic<TRequest, TResponse> topic,
+            Func<TRequest, RequestContext, CancellationToken, ValueTask<TResponse>> handler,
             CancellationToken cancellationToken = default)
         {
-            return RespondAsync(context, topic, PullSubQueueOptions.Default, handler, cancellationToken);
+            return RespondAsync(context, topic, QueueOptions.Default, handler, cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
-            this PullSubContext context,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
-            PullSubQueueOptions options,
-            Func<TRequest, PullSubRequestContext, CancellationToken, ValueTask<TResponse>> handler,
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
+            this CompositeSubscription context,
+            IRequestTopic<TRequest, TResponse> topic,
+            QueueOptions options,
+            Func<TRequest, RequestContext, CancellationToken, ValueTask<TResponse>> handler,
             CancellationToken cancellationToken = default)
         {
             if (handler == null)
@@ -349,20 +349,20 @@ namespace PullSub.Core
                 cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
-            this PullSubContext context,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
-            Func<TRequest, PullSubReplySender<TResponse>, CancellationToken, ValueTask> handler,
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
+            this CompositeSubscription context,
+            IRequestTopic<TRequest, TResponse> topic,
+            Func<TRequest, ReplySender<TResponse>, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
-            return RespondAsync(context, topic, PullSubQueueOptions.Default, handler, cancellationToken);
+            return RespondAsync(context, topic, QueueOptions.Default, handler, cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
-            this PullSubContext context,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
-            PullSubQueueOptions options,
-            Func<TRequest, PullSubReplySender<TResponse>, CancellationToken, ValueTask> handler,
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
+            this CompositeSubscription context,
+            IRequestTopic<TRequest, TResponse> topic,
+            QueueOptions options,
+            Func<TRequest, ReplySender<TResponse>, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
             if (context == null)
@@ -388,20 +388,20 @@ namespace PullSub.Core
                 cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
-            this PullSubContext context,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
-            Func<TRequest, PullSubRequestContext, PullSubReplySender<TResponse>, CancellationToken, ValueTask> handler,
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
+            this CompositeSubscription context,
+            IRequestTopic<TRequest, TResponse> topic,
+            Func<TRequest, RequestContext, ReplySender<TResponse>, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
-            return RespondAsync(context, topic, PullSubQueueOptions.Default, handler, cancellationToken);
+            return RespondAsync(context, topic, QueueOptions.Default, handler, cancellationToken);
         }
 
-        public static Task<PullSubQueueSubscription> RespondAsync<TRequest, TResponse>(
-            this PullSubContext context,
-            IPullSubRequestTopic<TRequest, TResponse> topic,
-            PullSubQueueOptions options,
-            Func<TRequest, PullSubRequestContext, PullSubReplySender<TResponse>, CancellationToken, ValueTask> handler,
+        public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
+            this CompositeSubscription context,
+            IRequestTopic<TRequest, TResponse> topic,
+            QueueOptions options,
+            Func<TRequest, RequestContext, ReplySender<TResponse>, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
             if (context == null)
@@ -429,7 +429,7 @@ namespace PullSub.Core
                         return;
 
                     var requestContext = CreateRequestContext(requestEnvelope);
-                    var sender = new PullSubReplySender<TResponse>(
+                    var sender = new ReplySender<TResponse>(
                         requestEnvelope.CorrelationId,
                         (responseEnvelope, sendCt) =>
                             PublishReplyAsync(context.Runtime, requestEnvelope.ReplyTo, responseEnvelope, responseEnvelopeCodec, sendCt));

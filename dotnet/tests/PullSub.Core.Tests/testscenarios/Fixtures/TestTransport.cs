@@ -26,7 +26,7 @@ namespace PullSub.Core.Tests.TestScenarios.Fixtures
         public Func<string, byte[], PullSubQualityOfServiceLevel, bool, CancellationToken, Task>? OnPublish { get; set; }
 
         public bool IsConnected { get; private set; }
-        public PullSubReconnectOptions ReconnectOptions { get; set; } = PullSubReconnectOptions.Default;
+        public ReconnectOptions ReconnectOptions { get; set; } = ReconnectOptions.Default;
 
         public IReadOnlyCollection<(string Topic, byte[] Payload, PullSubQualityOfServiceLevel Qos, bool Retain)> Published
             => _published.ToArray();

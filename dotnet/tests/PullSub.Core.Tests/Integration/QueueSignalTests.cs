@@ -18,7 +18,7 @@ namespace PullSub.Core.Tests.Integration
             const string topic = "test/queue/signal-order";
 
             await runtime.StartAsync();
-            await runtime.SubscribeQueueAsync(topic, new PullSubQueueOptions(8));
+            await runtime.SubscribeQueueAsync(topic, new QueueOptions(8));
 
             using var receiveCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             var firstWait = runtime.ReceiveQueueAsync(topic, receiveCts.Token);
@@ -42,7 +42,7 @@ namespace PullSub.Core.Tests.Integration
             const string topic = "test/queue/signal-cancel";
 
             await runtime.StartAsync();
-            await runtime.SubscribeQueueAsync(topic, new PullSubQueueOptions(8));
+            await runtime.SubscribeQueueAsync(topic, new QueueOptions(8));
 
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
             await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>

@@ -11,7 +11,7 @@ namespace PullSub.Core.Benchmarks
         private const string Topic = "bench/registry/topic";
 
         private readonly global::PullSub.Core.IPayloadCodec<Phase0PerfDataPayload> _codec
-            = global::PullSub.Core.PullSubJsonPayloadCodec<Phase0PerfDataPayload>.Default;
+            = global::PullSub.Core.JsonPayloadCodec<Phase0PerfDataPayload>.Default;
 
         private global::PullSub.Core.TypedDataRegistry? _registry;
         private byte[] _payload = Array.Empty<byte>();

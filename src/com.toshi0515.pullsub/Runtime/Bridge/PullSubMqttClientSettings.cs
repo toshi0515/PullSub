@@ -135,14 +135,14 @@ namespace PullSub.Bridge
         [Tooltip("Random jitter factor (0.0-1.0) applied to reconnect delays to avoid thundering herd.")]
         [SerializeField] [Range(0f, 1f)] private float _jitterFactor = 0.2f;
 
-        public PullSubReconnectOptions ToCoreOptions()
+        public ReconnectOptions ToCoreOptions()
         {
             var initialSeconds = Math.Max(1, _initialDelaySeconds);
             var maxSeconds = Math.Max(initialSeconds, _maxDelaySeconds);
             var backoffMultiplier = Math.Max(1f, _backoffMultiplier);
             var jitterFactor = Math.Clamp(_jitterFactor, 0f, 1f);
 
-            return new PullSubReconnectOptions(
+            return new ReconnectOptions(
                 initialDelay: TimeSpan.FromSeconds(initialSeconds),
                 maxDelay: TimeSpan.FromSeconds(maxSeconds),
                 multiplier: backoffMultiplier,
@@ -163,20 +163,20 @@ namespace PullSub.Bridge
     public sealed class PullSubClientRequestSettings
     {
         [Tooltip("Reply topic prefix for request/reply inbox.")]
-        [SerializeField] private string _replyTopicPrefix = PullSubRequestOptions.DefaultReplyTopicPrefix;
+        [SerializeField] private string _replyTopicPrefix = RequestOptions.DefaultReplyTopicPrefix;
 
         [Tooltip("Inbox idle timeout in seconds. Set 0 to keep subscription active.")]
-        [SerializeField] private int _inboxIdleTimeoutSeconds = PullSubRequestOptions.DefaultInboxIdleTimeoutSeconds;
+        [SerializeField] private int _inboxIdleTimeoutSeconds = RequestOptions.DefaultInboxIdleTimeoutSeconds;
 
         [Tooltip("Reply inbox queue depth for request/reply responses.")]
-        [SerializeField] private int _replyInboxQueueDepth = PullSubRequestOptions.DefaultReplyInboxQueueDepth;
+        [SerializeField] private int _replyInboxQueueDepth = RequestOptions.DefaultReplyInboxQueueDepth;
 
         [Tooltip("Maximum number of pending requests per runtime.")]
-        [SerializeField] private int _maxPendingRequests = PullSubRequestOptions.DefaultMaxPendingRequests;
+        [SerializeField] private int _maxPendingRequests = RequestOptions.DefaultMaxPendingRequests;
 
-        public PullSubRequestOptions ToCoreOptions()
+        public RequestOptions ToCoreOptions()
         {
-            return new PullSubRequestOptions(
+            return new RequestOptions(
                 replyTopicPrefix: _replyTopicPrefix,
                 inboxIdleTimeoutSeconds: _inboxIdleTimeoutSeconds,
                 replyInboxQueueDepth: _replyInboxQueueDepth,
@@ -273,7 +273,7 @@ namespace PullSub.Bridge
 
             var reconnectOptions = _reconnectSettings != null
                 ? _reconnectSettings.ToCoreOptions()
-                : PullSubReconnectOptions.FromInitialDelaySeconds(Math.Max(1, _legacyReconnectDelaySeconds));
+                : ReconnectOptions.FromInitialDelaySeconds(Math.Max(1, _legacyReconnectDelaySeconds));
 
             return new MqttConnectionOptions(
                 credentials: credentials,
@@ -285,13 +285,13 @@ namespace PullSub.Bridge
                 transport: transportOptions);
         }
 
-        public PullSubRequestOptions ToRequestOptions()
+        public RequestOptions ToRequestOptions()
         {
             EnsureRequestSettings();
 
             return _requestSettings != null
                 ? _requestSettings.ToCoreOptions()
-                : PullSubRequestOptions.Default;
+                : RequestOptions.Default;
         }
 
         public PullSubRuntimeOptions ToRuntimeOptions()

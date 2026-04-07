@@ -83,7 +83,7 @@ namespace PullSub.Core
                     waitTask = _firstValueSignal.Task;
                 }
 
-                await PullSubAsyncUtils.AwaitWithCancellation(waitTask, cancellationToken);
+                await AsyncUtils.AwaitWithCancellation(waitTask, cancellationToken);
             }
         }
 

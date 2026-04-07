@@ -15,23 +15,23 @@ namespace PullSub.Core.Tests.Integration
         [Fact]
         public void RequestTopic_Create_UsesTypedCodecs()
         {
-            var topic = PullSubRequestTopic.Create<SampleClassPayload, int>("test/request/topic");
+            var topic = RequestTopic.Create<SampleClassPayload, int>("test/request/topic");
 
             Assert.Equal("test/request/topic", topic.RequestTopicName);
-            Assert.IsType<PullSubJsonPayloadCodec<SampleClassPayload>>(topic.RequestCodec);
-            Assert.IsType<PullSubJsonPayloadCodec<int>>(topic.ResponseCodec);
+            Assert.IsType<JsonPayloadCodec<SampleClassPayload>>(topic.RequestCodec);
+            Assert.IsType<JsonPayloadCodec<int>>(topic.ResponseCodec);
         }
 
         [Fact]
         public void RequestTopic_Create_CachesEnvelopeCodecAssets()
         {
-            var topic = PullSubRequestTopic.Create<SampleClassPayload, int>("test/request/topic/cache");
-            var internalTopic = Assert.IsAssignableFrom<IPullSubRequestTopicInternal<SampleClassPayload, int>>(topic);
+            var topic = RequestTopic.Create<SampleClassPayload, int>("test/request/topic/cache");
+            var internalTopic = Assert.IsAssignableFrom<IRequestTopicInternal<SampleClassPayload, int>>(topic);
 
             Assert.Equal(topic.RequestTopicName, internalTopic.RequestEnvelopeTopic.TopicName);
             Assert.Same(internalTopic.RequestEnvelopeCodec, internalTopic.RequestEnvelopeTopic.Codec);
 
-            var envelope = new PullSubRequestEnvelope<SampleClassPayload>
+            var envelope = new RequestEnvelope<SampleClassPayload>
             {
                 CorrelationId = "corr-cache",
                 ReplyTo = "pullsub/reply/runtime-cache",
@@ -53,7 +53,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task ReplySender_IsOneShot()
         {
             var sendCount = 0;
-            var sender = new PullSubReplySender<int>(
+            var sender = new ReplySender<int>(
                 "corr-1",
                 (_, _) =>
                 {
@@ -71,7 +71,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task Runtime_CanReceiveRequestOptionsFromConstructor()
         {
             var transport = new TestTransport();
-            var options = new PullSubRequestOptions(
+            var options = new RequestOptions(
                 replyTopicPrefix: "custom/reply",
                 inboxIdleTimeoutSeconds: 30,
                 replyInboxQueueDepth: 512,
@@ -89,7 +89,7 @@ namespace PullSub.Core.Tests.Integration
         public void RequestEnvelopeCodec_RoundTrip_PreservesCoreFields()
         {
             var now = DateTime.UtcNow;
-            var envelope = new PullSubRequestEnvelope<SampleClassPayload>
+            var envelope = new RequestEnvelope<SampleClassPayload>
             {
                 CorrelationId = "corr-1",
                 ReplyTo = "pullsub/reply/runtime-1",
@@ -98,7 +98,7 @@ namespace PullSub.Core.Tests.Integration
                 Request = new SampleClassPayload { Value = 10, Counter = 20 },
             };
 
-            var codec = PullSubRequestEnvelopeCodec<SampleClassPayload>.Default;
+            var codec = RequestEnvelopeCodec<SampleClassPayload>.Default;
             var writer = new ArrayBufferWriter<byte>(256);
             codec.Encode(now, envelope, writer);
 
@@ -120,7 +120,7 @@ namespace PullSub.Core.Tests.Integration
         public void RequestEnvelopeCodec_DefaultJson_EncodesInlineRequestField()
         {
             var now = DateTime.UtcNow;
-            var envelope = new PullSubRequestEnvelope<SampleClassPayload>
+            var envelope = new RequestEnvelope<SampleClassPayload>
             {
                 CorrelationId = "corr-inline-request",
                 ReplyTo = "pullsub/reply/runtime-inline",
@@ -129,7 +129,7 @@ namespace PullSub.Core.Tests.Integration
                 Request = new SampleClassPayload { Value = 12, Counter = 34 },
             };
 
-            var codec = PullSubRequestEnvelopeCodec<SampleClassPayload>.Default;
+            var codec = RequestEnvelopeCodec<SampleClassPayload>.Default;
             var writer = new ArrayBufferWriter<byte>(256);
             codec.Encode(now, envelope, writer);
 
@@ -151,13 +151,13 @@ namespace PullSub.Core.Tests.Integration
             var now = DateTime.UtcNow;
             var json = $"{{\"correlationId\":\"corr-no-deadline\",\"replyTo\":\"pullsub/reply/runtime-1\",\"sentUtc\":\"{now:O}\",\"request\":123}}";
 
-            var codec = PullSubRequestEnvelopeCodec<int>.Default;
+            var codec = RequestEnvelopeCodec<int>.Default;
             var ok = codec.TryDecode(Encoding.UTF8.GetBytes(json), out var decoded, out _, out var error);
 
             Assert.True(ok, error);
             Assert.Equal(default, decoded.DeadlineUtc);
 
-            var context = new PullSubRequestContext(decoded.CorrelationId, decoded.ReplyTo, decoded.SentUtc, decoded.DeadlineUtc);
+            var context = new RequestContext(decoded.CorrelationId, decoded.ReplyTo, decoded.SentUtc, decoded.DeadlineUtc);
             Assert.False(context.IsExpired(DateTime.UtcNow));
         }
 
@@ -167,7 +167,7 @@ namespace PullSub.Core.Tests.Integration
             var now = DateTime.UtcNow;
             var json = $"{{\"correlationId\":\"corr-legacy-request\",\"replyTo\":\"pullsub/reply/runtime-1\",\"sentUtc\":\"{now:O}\",\"requestPayload\":\"AQID\"}}";
 
-            var codec = PullSubRequestEnvelopeCodec<int>.Default;
+            var codec = RequestEnvelopeCodec<int>.Default;
             var ok = codec.TryDecode(Encoding.UTF8.GetBytes(json), out _, out _, out var error);
 
             Assert.False(ok);
@@ -178,7 +178,7 @@ namespace PullSub.Core.Tests.Integration
         public void RequestEnvelopeCodec_CustomCodec_UsesRequestPayloadAndRoundTrips()
         {
             var now = DateTime.UtcNow;
-            var envelope = new PullSubRequestEnvelope<int>
+            var envelope = new RequestEnvelope<int>
             {
                 CorrelationId = "corr-custom-request",
                 ReplyTo = "pullsub/reply/runtime-custom",
@@ -187,7 +187,7 @@ namespace PullSub.Core.Tests.Integration
                 Request = 321,
             };
 
-            var codec = new PullSubRequestEnvelopeCodec<int>(new Int32BinaryPayloadCodec());
+            var codec = new RequestEnvelopeCodec<int>(new Int32BinaryPayloadCodec());
             var writer = new ArrayBufferWriter<byte>(256);
             codec.Encode(now, envelope, writer);
 
@@ -209,16 +209,16 @@ namespace PullSub.Core.Tests.Integration
         public void ResponseEnvelopeCodec_DefaultJson_EncodesInlineResponseField()
         {
             var now = DateTime.UtcNow;
-            var envelope = new PullSubResponseEnvelope<int>
+            var envelope = new ResponseEnvelope<int>
             {
                 CorrelationId = "corr-inline-response",
-                Status = PullSubResponseEnvelopeStatus.Success,
+                Status = ResponseEnvelopeStatus.Success,
                 ErrorMessage = string.Empty,
                 RespondedUtc = now,
                 Response = 42,
             };
 
-            var codec = PullSubResponseEnvelopeCodec<int>.Default;
+            var codec = ResponseEnvelopeCodec<int>.Default;
             var writer = new ArrayBufferWriter<byte>(256);
             codec.Encode(now, envelope, writer);
 
@@ -236,7 +236,7 @@ namespace PullSub.Core.Tests.Integration
             var now = DateTime.UtcNow;
             var json = $"{{\"correlationId\":\"corr-legacy-response\",\"status\":0,\"errorMessage\":\"\",\"respondedUtc\":\"{now:O}\",\"responsePayload\":\"AQID\"}}";
 
-            var codec = PullSubResponseEnvelopeCodec<int>.Default;
+            var codec = ResponseEnvelopeCodec<int>.Default;
             var ok = codec.TryDecode(Encoding.UTF8.GetBytes(json), out _, out _, out var error);
 
             Assert.False(ok);
@@ -247,16 +247,16 @@ namespace PullSub.Core.Tests.Integration
         public void ResponseEnvelopeCodec_CustomCodec_UsesResponsePayloadAndRoundTrips()
         {
             var now = DateTime.UtcNow;
-            var envelope = new PullSubResponseEnvelope<int>
+            var envelope = new ResponseEnvelope<int>
             {
                 CorrelationId = "corr-custom-response",
-                Status = PullSubResponseEnvelopeStatus.Success,
+                Status = ResponseEnvelopeStatus.Success,
                 ErrorMessage = string.Empty,
                 RespondedUtc = now,
                 Response = 654,
             };
 
-            var codec = new PullSubResponseEnvelopeCodec<int>(new Int32BinaryPayloadCodec());
+            var codec = new ResponseEnvelopeCodec<int>(new Int32BinaryPayloadCodec());
             var writer = new ArrayBufferWriter<byte>(256);
             codec.Encode(now, envelope, writer);
 

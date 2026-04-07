@@ -38,8 +38,8 @@ namespace PullSub.Editor
         private readonly struct ContextDebugView
         {
             public ContextDebugView(
-                PullSubContext context,
-                PullSubContext.ContextDebugSnapshot snapshot,
+                CompositeSubscription context,
+                CompositeSubscription.ContextDebugSnapshot snapshot,
                 MonoBehaviour owner)
             {
                 Context = context;
@@ -47,8 +47,8 @@ namespace PullSub.Editor
                 Owner = owner;
             }
 
-            public PullSubContext Context { get; }
-            public PullSubContext.ContextDebugSnapshot Snapshot { get; }
+            public CompositeSubscription Context { get; }
+            public CompositeSubscription.ContextDebugSnapshot Snapshot { get; }
             public MonoBehaviour Owner { get; }
         }
 
@@ -255,7 +255,7 @@ namespace PullSub.Editor
 
         private static ContextDebugView[] BuildContextViews(PullSubRuntime runtime)
         {
-            var contexts = PullSubContextDebugTracker.Snapshot(runtime);
+            var contexts = CompositeSubscriptionDebugTracker.Snapshot(runtime);
             if (contexts.Length == 0)
                 return Array.Empty<ContextDebugView>();
 
@@ -264,7 +264,7 @@ namespace PullSub.Editor
             {
                 var context = contexts[i];
                 var snapshot = context.GetDebugSnapshot();
-                PullSubContextOwnerDebugRegistry.TryGetOwner(context, out var owner);
+                CompositeSubscriptionDebugRegistry.TryGetOwner(context, out var owner);
                 result[i] = new ContextDebugView(context, snapshot, owner);
             }
 
@@ -518,7 +518,7 @@ namespace PullSub.Editor
             EditorGUILayout.LabelField($"  LastFailure: {reason}");
         }
 
-        private static void DrawRequestSection(PullSubPendingRequestStoreDebugSnapshot request, long inboundOversizeDropCount)
+        private static void DrawRequestSection(PendingRequestStoreDebugSnapshot request, long inboundOversizeDropCount)
         {
             EditorGUILayout.Space(4f);
             EditorGUILayout.LabelField("Request/Reply", EditorStyles.boldLabel);
@@ -540,7 +540,7 @@ namespace PullSub.Editor
                 EditorGUILayout.LabelField("  InboundOversizeDropped=0");
         }
 
-        private static bool HasRequestWarnings(PullSubPendingRequestStoreDebugSnapshot request)
+        private static bool HasRequestWarnings(PendingRequestStoreDebugSnapshot request)
         {
             return request.TimeoutCount > 0
                 || request.DuplicateDiscardCount > 0

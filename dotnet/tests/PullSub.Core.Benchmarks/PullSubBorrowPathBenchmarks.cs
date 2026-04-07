@@ -14,7 +14,7 @@ namespace PullSub.Core.Benchmarks
         private const string MixedTopic = "bench/borrow/mixed";
 
         private readonly BenchmarkTransport _transport = new BenchmarkTransport();
-        private readonly global::PullSub.Core.PullSubJsonPayloadCodec<Phase0PerfDataPayload> _codec = global::PullSub.Core.PullSubJsonPayloadCodec<Phase0PerfDataPayload>.Default;
+        private readonly global::PullSub.Core.JsonPayloadCodec<Phase0PerfDataPayload> _codec = global::PullSub.Core.JsonPayloadCodec<Phase0PerfDataPayload>.Default;
 
         private global::PullSub.Core.PullSubRuntime? _runtime;
         private byte[] _encoded = Array.Empty<byte>();
@@ -26,7 +26,7 @@ namespace PullSub.Core.Benchmarks
             _runtime.StartAsync().GetAwaiter().GetResult();
             _runtime.SubscribeDataAsync(DataTopic, _codec).GetAwaiter().GetResult();
             _runtime.SubscribeDataAsync(MixedTopic, _codec).GetAwaiter().GetResult();
-            _runtime.SubscribeQueueAsync(MixedTopic, new global::PullSub.Core.PullSubQueueOptions(1024)).GetAwaiter().GetResult();
+            _runtime.SubscribeQueueAsync(MixedTopic, new global::PullSub.Core.QueueOptions(1024)).GetAwaiter().GetResult();
 
             var payload = new Phase0PerfDataPayload
             {
@@ -80,8 +80,8 @@ namespace PullSub.Core.Benchmarks
             private int _callbacksSet;
 
             public bool IsConnected { get; private set; }
-            public global::PullSub.Core.PullSubReconnectOptions ReconnectOptions { get; }
-                = global::PullSub.Core.PullSubReconnectOptions.Default;
+            public global::PullSub.Core.ReconnectOptions ReconnectOptions { get; }
+                = global::PullSub.Core.ReconnectOptions.Default;
 
             public void SetCallbacks(
                 Func<Task> onConnected,

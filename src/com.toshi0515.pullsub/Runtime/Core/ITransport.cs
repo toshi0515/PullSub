@@ -7,7 +7,7 @@ namespace PullSub.Core
     public interface ITransport : IAsyncDisposable
     {
         bool IsConnected { get; }
-        PullSubReconnectOptions ReconnectOptions { get; }
+        ReconnectOptions ReconnectOptions { get; }
 
         void SetCallbacks(
             Func<Task> onConnected,

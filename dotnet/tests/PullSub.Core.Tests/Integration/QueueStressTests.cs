@@ -19,7 +19,7 @@ namespace PullSub.Core.Tests.Integration
             const int total = 1000;
 
             await runtime.StartAsync();
-            await runtime.SubscribeQueueAsync(topic, new PullSubQueueOptions(total + 16));
+            await runtime.SubscribeQueueAsync(topic, new QueueOptions(total + 16));
 
             var publishTask = Task.Run(async () =>
             {

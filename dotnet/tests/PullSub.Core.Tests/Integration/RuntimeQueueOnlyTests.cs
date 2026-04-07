@@ -18,7 +18,7 @@ namespace PullSub.Core.Tests.Integration
             const string topic = "test/queue/order";
 
             await runtime.StartAsync();
-            await runtime.SubscribeQueueAsync(topic, new PullSubQueueOptions(1));
+            await runtime.SubscribeQueueAsync(topic, new QueueOptions(1));
 
             await transport.EmitMessageAsync(topic, BuildPayload(1));
             await transport.EmitMessageAsync(topic, BuildPayload(2));

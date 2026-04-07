@@ -5,7 +5,7 @@ namespace PullSub.Core
 {
     public sealed partial class PullSubRuntime
     {
-        internal bool TryDequeue(string topic, out PullSubQueueMessage message)
+        internal bool TryDequeue(string topic, out QueueMessage message)
         {
             return _rawInbox.TryDequeue(topic, out message);
         }
@@ -15,10 +15,10 @@ namespace PullSub.Core
             return _rawInbox.TryGetDroppedCount(topic, out droppedCount);
         }
 
-        public async Task<PullSubQueueMessage> ReceiveQueueAsync(string topic, CancellationToken cancellationToken = default)
+        public async Task<QueueMessage> ReceiveQueueAsync(string topic, CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
-            PullSubSubscriptionRegistry.ValidateExactMatchTopic(topic);
+            SubscriptionRegistry.ValidateExactMatchTopic(topic);
             var operationToken = CreateOperationToken(cancellationToken, out var linkedCts);
 
             try
@@ -59,7 +59,7 @@ namespace PullSub.Core
         internal async Task<T> WaitForFirstDataAsync<T>(string topic, CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
-            PullSubSubscriptionRegistry.ValidateExactMatchTopic(topic);
+            SubscriptionRegistry.ValidateExactMatchTopic(topic);
 
             if (!_typedDataRegistry.TryGetCache<T>(topic, out var cache))
                 throw new System.InvalidOperationException(
@@ -80,16 +80,16 @@ namespace PullSub.Core
         /// トピックのデータハンドルを取得します。
         /// SubscribeDataAsync&lt;T&gt; で購読済みであることが前提です。
         /// </summary>
-        internal PullSubDataHandle<T> GetDataHandle<T>(string topic)
+        internal DataSubscription<T> GetDataHandle<T>(string topic)
         {
             ThrowIfDisposed();
-            PullSubSubscriptionRegistry.ValidateExactMatchTopic(topic);
+            SubscriptionRegistry.ValidateExactMatchTopic(topic);
 
             if (!_typedDataRegistry.TryGetCache<T>(topic, out var cache))
                 throw new System.InvalidOperationException(
                     $"Topic '{topic}' is not registered for type {typeof(T).Name}. Call SubscribeDataAsync<T> first.");
 
-            return new PullSubDataHandle<T>(this, topic, cache);
+            return new DataSubscription<T>(this, topic, cache);
         }
 
         internal T GetData<T>(string topic, T defaultValue = default)

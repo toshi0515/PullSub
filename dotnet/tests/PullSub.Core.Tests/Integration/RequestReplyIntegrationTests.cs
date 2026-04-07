@@ -15,7 +15,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RequestAsync_Success_ReturnsResponse()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/success");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/success");
 
             transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
             {
@@ -24,19 +24,19 @@ namespace PullSub.Core.Tests.Integration
                 if (!string.Equals(publishedTopic, topic.RequestTopicName, StringComparison.Ordinal))
                     return;
 
-                var requestCodec = new PullSubRequestEnvelopeCodec<int>(topic.RequestCodec);
+                var requestCodec = new RequestEnvelopeCodec<int>(topic.RequestCodec);
                 var ok = requestCodec.TryDecode(payload, out var requestEnvelope, out _, out var error);
                 Assert.True(ok, error);
 
-                var responseEnvelope = new PullSubResponseEnvelope<int>
+                var responseEnvelope = new ResponseEnvelope<int>
                 {
                     CorrelationId = requestEnvelope.CorrelationId,
-                    Status = PullSubResponseEnvelopeStatus.Success,
+                    Status = ResponseEnvelopeStatus.Success,
                     RespondedUtc = DateTime.UtcNow,
                     Response = requestEnvelope.Request + 1,
                 };
 
-                var responseCodec = new PullSubResponseEnvelopeCodec<int>(topic.ResponseCodec);
+                var responseCodec = new ResponseEnvelopeCodec<int>(topic.ResponseCodec);
                 var responsePayload = Encode(responseCodec, responseEnvelope);
 
                 await transport.EmitMessageAsync(requestEnvelope.ReplyTo, responsePayload);
@@ -54,7 +54,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RequestAsync_Timeout_ThrowsRequestException()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/timeout");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/timeout");
             transport.OnPublish = (publishedTopic, payload, qos, retain, ct) =>
             {
                 transport.RecordPublished(publishedTopic, payload, qos, retain);
@@ -75,7 +75,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RequestAsync_PublishFailure_ThrowsAndUpdatesDiagnostics()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/publish-failure");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/publish-failure");
             transport.OnPublish = (_, _, _, _, _) => throw new InvalidOperationException("publish failed");
 
             await using var runtime = new PullSubRuntime(transport);
@@ -95,7 +95,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RequestAsync_DisconnectDuringWait_FailsFast()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/disconnect");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/disconnect");
 
             transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
             {
@@ -121,7 +121,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RespondAsync_RuntimeResponder_ProcessesRequest()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/respond-runtime");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/respond-runtime");
 
             transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
             {
@@ -149,7 +149,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RequestAsync_IdleRelease_ThenReconnect_ResubscribesInboxOnNextRequest()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/idle-reconnect");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/idle-reconnect");
 
             transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
             {
@@ -158,24 +158,24 @@ namespace PullSub.Core.Tests.Integration
                 if (!string.Equals(publishedTopic, topic.RequestTopicName, StringComparison.Ordinal))
                     return;
 
-                var requestCodec = new PullSubRequestEnvelopeCodec<int>(topic.RequestCodec);
+                var requestCodec = new RequestEnvelopeCodec<int>(topic.RequestCodec);
                 var ok = requestCodec.TryDecode(payload, out var requestEnvelope, out _, out var error);
                 Assert.True(ok, error);
 
-                var responseEnvelope = new PullSubResponseEnvelope<int>
+                var responseEnvelope = new ResponseEnvelope<int>
                 {
                     CorrelationId = requestEnvelope.CorrelationId,
-                    Status = PullSubResponseEnvelopeStatus.Success,
+                    Status = ResponseEnvelopeStatus.Success,
                     RespondedUtc = DateTime.UtcNow,
                     Response = requestEnvelope.Request,
                 };
 
-                var responseCodec = new PullSubResponseEnvelopeCodec<int>(topic.ResponseCodec);
+                var responseCodec = new ResponseEnvelopeCodec<int>(topic.ResponseCodec);
                 var responsePayload = Encode(responseCodec, responseEnvelope);
                 await transport.EmitMessageAsync(requestEnvelope.ReplyTo, responsePayload);
             };
 
-            var requestOptions = new PullSubRequestOptions(
+            var requestOptions = new RequestOptions(
                 replyTopicPrefix: "pullsub/reply",
                 inboxIdleTimeoutSeconds: 1,
                 maxPendingRequests: 64);
@@ -210,7 +210,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RequestAsync_ConcurrentInitialCalls_DoNotRaceInboxSetup()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/concurrent-init");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/concurrent-init");
 
             transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
             {
@@ -219,19 +219,19 @@ namespace PullSub.Core.Tests.Integration
                 if (!string.Equals(publishedTopic, topic.RequestTopicName, StringComparison.Ordinal))
                     return;
 
-                var requestCodec = new PullSubRequestEnvelopeCodec<int>(topic.RequestCodec);
+                var requestCodec = new RequestEnvelopeCodec<int>(topic.RequestCodec);
                 var ok = requestCodec.TryDecode(payload, out var requestEnvelope, out _, out var error);
                 Assert.True(ok, error);
 
-                var responseEnvelope = new PullSubResponseEnvelope<int>
+                var responseEnvelope = new ResponseEnvelope<int>
                 {
                     CorrelationId = requestEnvelope.CorrelationId,
-                    Status = PullSubResponseEnvelopeStatus.Success,
+                    Status = ResponseEnvelopeStatus.Success,
                     RespondedUtc = DateTime.UtcNow,
                     Response = requestEnvelope.Request,
                 };
 
-                var responseCodec = new PullSubResponseEnvelopeCodec<int>(topic.ResponseCodec);
+                var responseCodec = new ResponseEnvelopeCodec<int>(topic.ResponseCodec);
                 var responsePayload = Encode(responseCodec, responseEnvelope);
 
                 await transport.EmitMessageAsync(requestEnvelope.ReplyTo, responsePayload);
@@ -259,7 +259,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RespondAsync_ConvenienceHandler_PreservesReplyPublishFailureCause()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/reply-publish-failure-cause");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/reply-publish-failure-cause");
 
             transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
             {
@@ -303,7 +303,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RequestAsync_DisconnectBeforePublishFailure_ClassifiesAsConnectionLost()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/disconnect-before-publish-failure");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/disconnect-before-publish-failure");
 
             transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
             {
@@ -334,7 +334,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RespondAsync_WithRequestContext_ExposesDeadline()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/request-context-deadline");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/request-context-deadline");
 
             transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
             {
@@ -369,7 +369,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RespondAsync_ConvenienceHandler_ExpiredRequest_SkipsReplyPublish()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/expired-request-skip-reply");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/expired-request-skip-reply");
             var replyPublishCount = 0;
 
             transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
@@ -410,7 +410,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RespondAsync_InvalidReplyTo_DoesNotFaultResponderAndContinues()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/invalid-replyto-resilience");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/invalid-replyto-resilience");
 
             transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
             {
@@ -418,7 +418,7 @@ namespace PullSub.Core.Tests.Integration
 
                 if (string.Equals(publishedTopic, topic.RequestTopicName, StringComparison.Ordinal))
                 {
-                    var requestCodec = new PullSubRequestEnvelopeCodec<int>(topic.RequestCodec);
+                    var requestCodec = new RequestEnvelopeCodec<int>(topic.RequestCodec);
                     var ok = requestCodec.TryDecode(payload, out var requestEnvelope, out _, out var error);
                     Assert.True(ok, error);
 
@@ -458,7 +458,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RespondAsync_ReplyToPrefixMismatch_DropsReplyAndContinues()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/replyto-prefix-mismatch");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/replyto-prefix-mismatch");
 
             transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
             {
@@ -466,7 +466,7 @@ namespace PullSub.Core.Tests.Integration
 
                 if (string.Equals(publishedTopic, topic.RequestTopicName, StringComparison.Ordinal))
                 {
-                    var requestCodec = new PullSubRequestEnvelopeCodec<int>(topic.RequestCodec);
+                    var requestCodec = new RequestEnvelopeCodec<int>(topic.RequestCodec);
                     var ok = requestCodec.TryDecode(payload, out var requestEnvelope, out _, out var error);
                     Assert.True(ok, error);
 
@@ -506,7 +506,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RespondAsync_ReplyToUppercaseHex_DropsReplyAndContinues()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/replyto-uppercase-hex");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/replyto-uppercase-hex");
 
             transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
             {
@@ -514,7 +514,7 @@ namespace PullSub.Core.Tests.Integration
 
                 if (string.Equals(publishedTopic, topic.RequestTopicName, StringComparison.Ordinal))
                 {
-                    var requestCodec = new PullSubRequestEnvelopeCodec<int>(topic.RequestCodec);
+                    var requestCodec = new RequestEnvelopeCodec<int>(topic.RequestCodec);
                     var ok = requestCodec.TryDecode(payload, out var requestEnvelope, out _, out var error);
                     Assert.True(ok, error);
 
@@ -554,7 +554,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RespondAsync_InvalidRequestEnvelope_DoesNotFaultResponderAndContinues()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/invalid-request-envelope");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/invalid-request-envelope");
             var malformedInjected = 0;
 
             transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
@@ -598,7 +598,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RespondAsync_ConvenienceHandler_Exception_UsesFixedRemoteErrorMessage()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/fixed-remote-error");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/fixed-remote-error");
 
             transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
             {
@@ -626,7 +626,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RequestAsync_CanBeCalledFromContext()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/context-request");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/context-request");
 
             transport.OnPublish = async (publishedTopic, payload, qos, retain, ct) =>
             {
@@ -675,7 +675,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RequestAsync_WithCustomBinaryCodecs_RemainsCompatible()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>(
+            var topic = RequestTopic.Create<int, int>(
                 "test/request-reply/custom-binary-codecs",
                 new Int32BinaryPayloadCodec(),
                 new Int32BinaryPayloadCodec());
@@ -687,19 +687,19 @@ namespace PullSub.Core.Tests.Integration
                 if (!string.Equals(publishedTopic, topic.RequestTopicName, StringComparison.Ordinal))
                     return;
 
-                var requestCodec = new PullSubRequestEnvelopeCodec<int>(topic.RequestCodec);
+                var requestCodec = new RequestEnvelopeCodec<int>(topic.RequestCodec);
                 var ok = requestCodec.TryDecode(payload, out var requestEnvelope, out _, out var error);
                 Assert.True(ok, error);
 
-                var responseEnvelope = new PullSubResponseEnvelope<int>
+                var responseEnvelope = new ResponseEnvelope<int>
                 {
                     CorrelationId = requestEnvelope.CorrelationId,
-                    Status = PullSubResponseEnvelopeStatus.Success,
+                    Status = ResponseEnvelopeStatus.Success,
                     RespondedUtc = DateTime.UtcNow,
                     Response = requestEnvelope.Request + 10,
                 };
 
-                var responseCodec = new PullSubResponseEnvelopeCodec<int>(topic.ResponseCodec);
+                var responseCodec = new ResponseEnvelopeCodec<int>(topic.ResponseCodec);
                 var responsePayload = Encode(responseCodec, responseEnvelope);
                 await transport.EmitMessageAsync(requestEnvelope.ReplyTo, responsePayload);
             };
@@ -716,7 +716,7 @@ namespace PullSub.Core.Tests.Integration
         public async Task RequestAsync_ExceedingMaxPendingRequests_ThrowsTooManyPendingRequests()
         {
             var transport = new TestTransport();
-            var topic = PullSubRequestTopic.Create<int, int>("test/request-reply/max-pending");
+            var topic = RequestTopic.Create<int, int>("test/request-reply/max-pending");
 
             transport.OnPublish = (publishedTopic, payload, qos, retain, ct) =>
             {
@@ -724,7 +724,7 @@ namespace PullSub.Core.Tests.Integration
                 return Task.CompletedTask;
             };
 
-            var requestOptions = new PullSubRequestOptions(
+            var requestOptions = new RequestOptions(
                 replyTopicPrefix: "pullsub/reply",
                 inboxIdleTimeoutSeconds: 60,
                 replyInboxQueueDepth: 256,
@@ -796,13 +796,13 @@ namespace PullSub.Core.Tests.Integration
             }
         }
 
-        private sealed class CustomRequestTopic<TRequest, TResponse> : IPullSubRequestTopic<TRequest, TResponse>
+        private sealed class CustomRequestTopic<TRequest, TResponse> : IRequestTopic<TRequest, TResponse>
         {
             public CustomRequestTopic(string requestTopicName)
             {
                 RequestTopicName = requestTopicName;
-                RequestCodec = PullSubJsonPayloadCodec<TRequest>.Default;
-                ResponseCodec = PullSubJsonPayloadCodec<TResponse>.Default;
+                RequestCodec = JsonPayloadCodec<TRequest>.Default;
+                ResponseCodec = JsonPayloadCodec<TResponse>.Default;
             }
 
             public string RequestTopicName { get; }

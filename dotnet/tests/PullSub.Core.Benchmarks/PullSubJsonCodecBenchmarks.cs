@@ -8,8 +8,8 @@ namespace PullSub.Core.Benchmarks
     [MemoryDiagnoser]
     public class PullSubJsonCodecBenchmarks
     {
-        private readonly global::PullSub.Core.PullSubJsonPayloadCodec<Phase0PerfDataPayload> _jsonCodec = global::PullSub.Core.PullSubJsonPayloadCodec<Phase0PerfDataPayload>.Default;
-        private readonly global::PullSub.Core.PullSubFlatJsonPayloadCodec<Phase0PerfDataPayload> _flatCodec = global::PullSub.Core.PullSubFlatJsonPayloadCodec<Phase0PerfDataPayload>.Default;
+        private readonly global::PullSub.Core.JsonPayloadCodec<Phase0PerfDataPayload> _jsonCodec = global::PullSub.Core.JsonPayloadCodec<Phase0PerfDataPayload>.Default;
+        private readonly global::PullSub.Core.FlatJsonPayloadCodec<Phase0PerfDataPayload> _flatCodec = global::PullSub.Core.FlatJsonPayloadCodec<Phase0PerfDataPayload>.Default;
 
         private Phase0PerfDataPayload _payload;
         private byte[] _jsonEncoded = Array.Empty<byte>();

@@ -20,7 +20,7 @@ namespace PullSub.Core.Tests.Integration
 
             await runtime.StartAsync();
             await runtime.SubscribeDataAsync(topic, codec);
-            await runtime.SubscribeQueueAsync(topic, new PullSubQueueOptions(8));
+            await runtime.SubscribeQueueAsync(topic, new QueueOptions(8));
 
             var sourcePayload = Encode(codec, new SampleClassPayload { Value = 123, Counter = 7 });
             await transport.EmitMessageAsync(topic, sourcePayload);

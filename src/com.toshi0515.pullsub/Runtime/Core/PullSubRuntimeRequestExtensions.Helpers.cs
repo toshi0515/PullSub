@@ -7,37 +7,37 @@ namespace PullSub.Core
 {
     public static partial class PullSubRuntimeRequestExtensions
     {
-        private static PullSubRequestContext CreateRequestContext<TRequest>(PullSubRequestEnvelope<TRequest> requestEnvelope)
+        private static RequestContext CreateRequestContext<TRequest>(RequestEnvelope<TRequest> requestEnvelope)
         {
-            return new PullSubRequestContext(
+            return new RequestContext(
                 requestEnvelope.CorrelationId,
                 requestEnvelope.ReplyTo,
                 requestEnvelope.SentUtc,
                 requestEnvelope.DeadlineUtc);
         }
 
-        private static PullSubRequestEnvelopeCodec<TRequest> ResolveRequestEnvelopeCodec<TRequest, TResponse>(
-            IPullSubRequestTopic<TRequest, TResponse> topic)
+        private static RequestEnvelopeCodec<TRequest> ResolveRequestEnvelopeCodec<TRequest, TResponse>(
+            IRequestTopic<TRequest, TResponse> topic)
         {
-            if (topic is IPullSubRequestTopicInternal<TRequest, TResponse> internalTopic)
+            if (topic is IRequestTopicInternal<TRequest, TResponse> internalTopic)
                 return internalTopic.RequestEnvelopeCodec;
 
-            return new PullSubRequestEnvelopeCodec<TRequest>(topic.RequestCodec);
+            return new RequestEnvelopeCodec<TRequest>(topic.RequestCodec);
         }
 
-        private static PullSubResponseEnvelopeCodec<TResponse> ResolveResponseEnvelopeCodec<TRequest, TResponse>(
-            IPullSubRequestTopic<TRequest, TResponse> topic)
+        private static ResponseEnvelopeCodec<TResponse> ResolveResponseEnvelopeCodec<TRequest, TResponse>(
+            IRequestTopic<TRequest, TResponse> topic)
         {
-            if (topic is IPullSubRequestTopicInternal<TRequest, TResponse> internalTopic)
+            if (topic is IRequestTopicInternal<TRequest, TResponse> internalTopic)
                 return internalTopic.ResponseEnvelopeCodec;
 
-            return new PullSubResponseEnvelopeCodec<TResponse>(topic.ResponseCodec);
+            return new ResponseEnvelopeCodec<TResponse>(topic.ResponseCodec);
         }
 
-        private static IPullSubTopic<byte[]> ResolveRawRequestEnvelopeTopic<TRequest, TResponse>(
-            IPullSubRequestTopic<TRequest, TResponse> topic)
+        private static ITopic<byte[]> ResolveRawRequestEnvelopeTopic<TRequest, TResponse>(
+            IRequestTopic<TRequest, TResponse> topic)
         {
-            return PullSubTopic.Create(topic.RequestTopicName, PullSubRawBinaryPayloadCodec.Default);
+            return PullSubTopic.Create(topic.RequestTopicName, RawBinaryPayloadCodec.Default);
         }
 
         private static byte[] EncodePayload<T>(IPayloadCodec<T> codec, DateTime timestampUtc, T value)
@@ -53,8 +53,8 @@ namespace PullSub.Core
         private static Task PublishReplyAsync<TResponse>(
             PullSubRuntime runtime,
             string replyTo,
-            PullSubResponseEnvelope<TResponse> responseEnvelope,
-            PullSubResponseEnvelopeCodec<TResponse> responseEnvelopeCodec,
+            ResponseEnvelope<TResponse> responseEnvelope,
+            ResponseEnvelopeCodec<TResponse> responseEnvelopeCodec,
             CancellationToken cancellationToken)
         {
             if (!IsAllowedReplyTo(runtime, replyTo))
@@ -84,9 +84,9 @@ namespace PullSub.Core
 
         private static bool TryDecodeRequestEnvelope<TRequest>(
             PullSubRuntime runtime,
-            PullSubRequestEnvelopeCodec<TRequest> requestEnvelopeCodec,
+            RequestEnvelopeCodec<TRequest> requestEnvelopeCodec,
             byte[] requestEnvelopePayload,
-            out PullSubRequestEnvelope<TRequest> requestEnvelope)
+            out RequestEnvelope<TRequest> requestEnvelope)
         {
             requestEnvelope = default;
 
@@ -127,7 +127,7 @@ namespace PullSub.Core
 
             try
             {
-                PullSubSubscriptionRegistry.ValidateExactMatchTopic(replyTo);
+                SubscriptionRegistry.ValidateExactMatchTopic(replyTo);
             }
             catch (PullSubWildcardTopicNotSupportedException)
             {
@@ -167,9 +167,9 @@ namespace PullSub.Core
             return "Remote handler failed.";
         }
 
-        private static Func<TRequest, PullSubRequestContext, PullSubReplySender<TResponse>, CancellationToken, ValueTask>
+        private static Func<TRequest, RequestContext, ReplySender<TResponse>, CancellationToken, ValueTask>
             WrapValueResponderHandler<TRequest, TResponse>(
-                Func<TRequest, PullSubRequestContext, CancellationToken, ValueTask<TResponse>> handler)
+                Func<TRequest, RequestContext, CancellationToken, ValueTask<TResponse>> handler)
         {
             return async (request, requestContext, sender, ct) =>
             {
@@ -198,7 +198,7 @@ namespace PullSub.Core
             };
         }
 
-        private static Func<TRequest, PullSubRequestContext, PullSubReplySender<TResponse>, CancellationToken, ValueTask>
+        private static Func<TRequest, RequestContext, ReplySender<TResponse>, CancellationToken, ValueTask>
             WrapValueResponderHandler<TRequest, TResponse>(
                 Func<TRequest, CancellationToken, ValueTask<TResponse>> handler)
         {

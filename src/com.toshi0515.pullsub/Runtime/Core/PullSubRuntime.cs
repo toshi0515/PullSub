@@ -12,19 +12,19 @@ namespace PullSub.Core
         private readonly SemaphoreSlim _resubscribeGate = new SemaphoreSlim(1, 1);
         private readonly SemaphoreSlim _subscriptionGate = new SemaphoreSlim(1, 1);
         private readonly ITransport _transport;
-        private readonly PullSubSubscriptionRegistry _subscriptions = new PullSubSubscriptionRegistry();
+        private readonly SubscriptionRegistry _subscriptions = new SubscriptionRegistry();
         private readonly TypedDataRegistry _typedDataRegistry = new TypedDataRegistry();
         private readonly PullSubQueueInbox _rawInbox = new PullSubQueueInbox();
         private readonly CancellationTokenSource _disposeCts = new CancellationTokenSource();
 
-        private readonly PullSubMessageDispatcher _messageDispatcher;
-        private readonly PullSubShutdownCoordinator _shutdownCoordinator;
+        private readonly MessageDispatcher _messageDispatcher;
+        private readonly ShutdownCoordinator _shutdownCoordinator;
         private readonly HashSet<string> _networkSubscribedTopics = new HashSet<string>(StringComparer.Ordinal);
-        private readonly PullSubRequestOptions _requestOptions;
+        private readonly RequestOptions _requestOptions;
         private readonly PullSubRuntimeOptions _runtimeOptions;
         private readonly string _requestRuntimeNonce = Guid.NewGuid().ToString("N");
-        private readonly PullSubPendingRequestStore _pendingRequestStore;
-        private readonly PullSubReplyInboxLease _replyInboxLease;
+        private readonly PendingRequestStore _pendingRequestStore;
+        private readonly ReplyInboxLease _replyInboxLease;
         private readonly object _securityLogGate = new object();
 
         private long _inboundOversizeDropCount;
@@ -46,7 +46,7 @@ namespace PullSub.Core
 
         private int _disposeGuard;
         private int _reconnectAttemptCount;
-        private TimeSpan _reconnectCurrentDelay = PullSubReconnectOptions.Default.InitialDelay;
+        private TimeSpan _reconnectCurrentDelay = ReconnectOptions.Default.InitialDelay;
         private DateTime _reconnectNextRetryAtUtc;
         private string _reconnectLastFailureReason = string.Empty;
         private PullSubState _state = PullSubState.NotStarted;
@@ -57,7 +57,7 @@ namespace PullSub.Core
             Action<string> logWarning = null,
             Action<string> logError = null,
             Action<Exception> logException = null,
-            PullSubRequestOptions requestOptions = null,
+            RequestOptions requestOptions = null,
             PullSubRuntimeOptions runtimeOptions = null)
         {
             _transport = transport ?? throw new ArgumentNullException(nameof(transport));
@@ -65,22 +65,22 @@ namespace PullSub.Core
             _logWarning = logWarning ?? (_ => { });
             _logError = logError ?? (_ => { });
             _logException = logException ?? (_ => { });
-            _requestOptions = requestOptions ?? PullSubRequestOptions.Default;
+            _requestOptions = requestOptions ?? RequestOptions.Default;
             _runtimeOptions = runtimeOptions ?? PullSubRuntimeOptions.Default;
-            _pendingRequestStore = new PullSubPendingRequestStore(
+            _pendingRequestStore = new PendingRequestStore(
                 _requestOptions.MaxPendingRequests,
                 _ => { });
-            _replyInboxLease = new PullSubReplyInboxLease(
+            _replyInboxLease = new ReplyInboxLease(
                 this,
                 BuildReplyInboxTopic(_requestOptions.ReplyTopicPrefix, _requestRuntimeNonce),
                 _pendingRequestStore,
                 _requestOptions.InboxIdleTimeout,
-                new PullSubQueueOptions(_requestOptions.ReplyInboxQueueDepth),
+                new QueueOptions(_requestOptions.ReplyInboxQueueDepth),
                 _logException,
                 _runtimeOptions,
                 MarkInboundOversizeDrop);
-            _shutdownCoordinator = new PullSubShutdownCoordinator(_logError);
-            _messageDispatcher = new PullSubMessageDispatcher(
+            _shutdownCoordinator = new ShutdownCoordinator(_logError);
+            _messageDispatcher = new MessageDispatcher(
                 _subscriptions,
                 _typedDataRegistry,
                 _rawInbox,
@@ -95,7 +95,7 @@ namespace PullSub.Core
                 HandleMessageReceivedAsync);
         }
 
-        public PullSubRequestOptions RequestOptions => _requestOptions;
+        public RequestOptions RequestOptions => _requestOptions;
         public PullSubRuntimeOptions RuntimeOptions => _runtimeOptions;
         internal string ReplyInboxTopic => _replyInboxLease.Topic;
         internal bool IsReplyInboxSubscribed => _replyInboxLease.IsSubscribed;
@@ -124,7 +124,7 @@ namespace PullSub.Core
             return _replyInboxLease.EnsureSubscribedAsync(cancellationToken);
         }
 
-        internal PullSubPendingRequestRegistration RegisterPendingRequest(
+        internal PendingRequestRegistration RegisterPendingRequest(
             string correlationId,
             DateTime deadlineUtc,
             CancellationToken cancellationToken)
@@ -250,7 +250,7 @@ namespace PullSub.Core
             _pendingRequestStore.FailAll(failureKind);
         }
 
-        internal PullSubPendingRequestStoreDebugSnapshot GetPendingRequestStoreSnapshot()
+        internal PendingRequestStoreDebugSnapshot GetPendingRequestStoreSnapshot()
         {
             return _pendingRequestStore.GetDebugSnapshot(_replyInboxLease.IsSubscribed);
         }
@@ -364,7 +364,7 @@ namespace PullSub.Core
                         waitTask = _readySignal.Task;
                     }
 
-                    await PullSubAsyncUtils.AwaitWithCancellation(waitTask, operationToken);
+                    await AsyncUtils.AwaitWithCancellation(waitTask, operationToken);
                 }
             }
             finally
@@ -453,7 +453,7 @@ namespace PullSub.Core
             _resubscribeGate.Dispose();
             _startStopGate.Dispose();
             PullSubQueueHandlerDebugTracker.OnRuntimeDisposed(this);
-            PullSubContextDebugTracker.OnRuntimeDisposed(this);
+            CompositeSubscriptionDebugTracker.OnRuntimeDisposed(this);
         }
 
         private async Task DisconnectCoreAsync(CancellationToken cancellationToken, bool allowWhenDisposed = false)
@@ -564,7 +564,7 @@ namespace PullSub.Core
 
             var normalizedPrefix = prefix.TrimEnd('/');
             var topic = $"{normalizedPrefix}/{runtimeNonce}";
-            PullSubSubscriptionRegistry.ValidateExactMatchTopic(topic);
+            SubscriptionRegistry.ValidateExactMatchTopic(topic);
             return topic;
         }
 
@@ -727,7 +727,7 @@ namespace PullSub.Core
 
             try
             {
-                await PullSubAsyncUtils.AwaitWithCancellation(loopTask, cancellationToken);
+                await AsyncUtils.AwaitWithCancellation(loopTask, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -736,7 +736,7 @@ namespace PullSub.Core
 
         private async Task RunConnectionLoopAsync(CancellationToken cancellationToken)
         {
-            var reconnectOptions = _transport.ReconnectOptions ?? PullSubReconnectOptions.Default;
+            var reconnectOptions = _transport.ReconnectOptions ?? ReconnectOptions.Default;
             var nextDelay = reconnectOptions.InitialDelay;
 
             try
@@ -760,7 +760,7 @@ namespace PullSub.Core
                             InitializeReconnectStateNoLock(reconnectOptions);
                         }
 
-                        await PullSubAsyncUtils.AwaitWithCancellation(disconnectSignal.Task, cancellationToken);
+                        await AsyncUtils.AwaitWithCancellation(disconnectSignal.Task, cancellationToken);
 
                         if (cancellationToken.IsCancellationRequested)
                             break;
@@ -814,7 +814,7 @@ namespace PullSub.Core
             return TimeSpan.FromMilliseconds(jitteredMs);
         }
 
-        private static TimeSpan ComputeNextDelay(TimeSpan currentDelay, PullSubReconnectOptions options)
+        private static TimeSpan ComputeNextDelay(TimeSpan currentDelay, ReconnectOptions options)
         {
             var scaledTicks = (long)(currentDelay.Ticks * options.Multiplier);
             if (scaledTicks < options.InitialDelay.Ticks)
@@ -826,9 +826,9 @@ namespace PullSub.Core
             return TimeSpan.FromTicks(scaledTicks);
         }
 
-        private void InitializeReconnectStateNoLock(PullSubReconnectOptions options)
+        private void InitializeReconnectStateNoLock(ReconnectOptions options)
         {
-            var resolved = options ?? PullSubReconnectOptions.Default;
+            var resolved = options ?? ReconnectOptions.Default;
             _reconnectAttemptCount = 0;
             _reconnectCurrentDelay = resolved.InitialDelay;
             _reconnectNextRetryAtUtc = default;
@@ -948,7 +948,7 @@ namespace PullSub.Core
             if (exception == null)
                 return;
 
-            _logError($"[PullSubPublishObserver] Publish failed: {exception.Message}");
+            _logError($"[PublishObserver] Publish failed: {exception.Message}");
             _logException(exception);
         }
 

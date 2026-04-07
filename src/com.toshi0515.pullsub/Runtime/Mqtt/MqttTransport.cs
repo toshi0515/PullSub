@@ -19,7 +19,7 @@ namespace PullSub.Mqtt
         private Func<string, ReadOnlyMemory<byte>, Task> _onMessageReceived = (_, __) => Task.CompletedTask;
 
         public bool IsConnected => _client.IsConnected;
-        public PullSubReconnectOptions ReconnectOptions => _connectionOptions.ReconnectOptions;
+        public ReconnectOptions ReconnectOptions => _connectionOptions.ReconnectOptions;
 
         public MqttTransport(
             string brokerHost,

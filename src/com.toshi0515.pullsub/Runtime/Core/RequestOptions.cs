@@ -1,0 +1,108 @@
+using System;
+
+namespace PullSub.Core
+{
+    /// <summary>
+    /// Runtime-scoped configuration for request/reply behavior.
+    /// </summary>
+    public sealed class RequestOptions : IEquatable<RequestOptions>
+    {
+        public const string DefaultReplyTopicPrefix = "pullsub/reply";
+        public const int DefaultInboxIdleTimeoutSeconds = 60;
+        public const int DefaultReplyInboxQueueDepth = QueueOptions.DefaultMaxQueueDepth;
+        public const int DefaultMaxPendingRequests = 1024;
+
+        public static RequestOptions Default { get; }
+            = new RequestOptions(
+                DefaultReplyTopicPrefix,
+                DefaultInboxIdleTimeoutSeconds,
+                DefaultReplyInboxQueueDepth,
+                DefaultMaxPendingRequests);
+
+        public RequestOptions(
+            string replyTopicPrefix,
+            int inboxIdleTimeoutSeconds,
+            int maxPendingRequests)
+            : this(
+                replyTopicPrefix,
+                TimeSpan.FromSeconds(inboxIdleTimeoutSeconds),
+                DefaultReplyInboxQueueDepth,
+                maxPendingRequests)
+        {
+        }
+
+        public RequestOptions(
+            string replyTopicPrefix,
+            int inboxIdleTimeoutSeconds,
+            int replyInboxQueueDepth,
+            int maxPendingRequests)
+            : this(
+                replyTopicPrefix,
+                TimeSpan.FromSeconds(inboxIdleTimeoutSeconds),
+                replyInboxQueueDepth,
+                maxPendingRequests)
+        {
+        }
+
+        public RequestOptions(
+            string replyTopicPrefix = DefaultReplyTopicPrefix,
+            TimeSpan? inboxIdleTimeout = null,
+            int replyInboxQueueDepth = DefaultReplyInboxQueueDepth,
+            int maxPendingRequests = DefaultMaxPendingRequests)
+        {
+            if (string.IsNullOrWhiteSpace(replyTopicPrefix))
+                throw new ArgumentException("replyTopicPrefix is required.", nameof(replyTopicPrefix));
+
+            if (replyTopicPrefix.IndexOf('#') >= 0 || replyTopicPrefix.IndexOf('+') >= 0)
+                throw new PullSubWildcardTopicNotSupportedException(replyTopicPrefix);
+
+            var idleTimeout = inboxIdleTimeout ?? TimeSpan.FromSeconds(DefaultInboxIdleTimeoutSeconds);
+            if (idleTimeout < TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(nameof(inboxIdleTimeout), "inboxIdleTimeout must be zero or greater.");
+
+            if (replyInboxQueueDepth < 1)
+                throw new ArgumentOutOfRangeException(nameof(replyInboxQueueDepth), "replyInboxQueueDepth must be greater than 0.");
+
+            if (maxPendingRequests < 1)
+                throw new ArgumentOutOfRangeException(nameof(maxPendingRequests), "maxPendingRequests must be greater than 0.");
+
+            ReplyTopicPrefix = replyTopicPrefix;
+            InboxIdleTimeout = idleTimeout;
+            ReplyInboxQueueDepth = replyInboxQueueDepth;
+            MaxPendingRequests = maxPendingRequests;
+        }
+
+        public string ReplyTopicPrefix { get; }
+        public TimeSpan InboxIdleTimeout { get; }
+        public int ReplyInboxQueueDepth { get; }
+        public int MaxPendingRequests { get; }
+
+        public bool Equals(RequestOptions other)
+        {
+            if (ReferenceEquals(null, other))
+                return false;
+
+            if (ReferenceEquals(this, other))
+                return true;
+
+            return string.Equals(ReplyTopicPrefix, other.ReplyTopicPrefix, StringComparison.Ordinal)
+                && InboxIdleTimeout == other.InboxIdleTimeout
+                && ReplyInboxQueueDepth == other.ReplyInboxQueueDepth
+                && MaxPendingRequests == other.MaxPendingRequests;
+        }
+
+        public override bool Equals(object obj) => Equals(obj as RequestOptions);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                var hashCode = StringComparer.Ordinal.GetHashCode(ReplyTopicPrefix);
+                hashCode = (hashCode * 397) ^ InboxIdleTimeout.GetHashCode();
+                hashCode = (hashCode * 397) ^ ReplyInboxQueueDepth;
+                hashCode = (hashCode * 397) ^ MaxPendingRequests;
+                return hashCode;
+            }
+        }
+    }
+}

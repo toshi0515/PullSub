@@ -99,7 +99,7 @@ namespace PullSub.Core.Tests.Integration
             const string topic = "test/queue/decode-failure";
 
             await runtime.StartAsync();
-            await runtime.SubscribeQueueAsync(topic, PullSubQueueOptions.Default);
+            await runtime.SubscribeQueueAsync(topic, QueueOptions.Default);
             await transport.EmitMessageAsync(topic, new byte[] { 1, 2, 3 });
 
             var ex = await Assert.ThrowsAsync<PullSubPayloadDecodeException>(() =>

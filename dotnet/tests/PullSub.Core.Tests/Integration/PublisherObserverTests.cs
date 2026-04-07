@@ -184,7 +184,7 @@ namespace PullSub.Core.Tests.Integration
             Assert.Empty(transport.Published);
         }
 
-        private static bool DecodeOrThrow(IPullSubTopic<int> topic, byte[] payload, out int value)
+        private static bool DecodeOrThrow(ITopic<int> topic, byte[] payload, out int value)
         {
             if (!topic.Codec.TryDecode(payload, out value, out _, out var error))
                 throw new InvalidOperationException($"Failed to decode payload: {error}");
