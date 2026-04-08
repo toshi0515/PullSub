@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace PullSub.Core
 {
-    public sealed class CompositeSubscription : IDisposable, IAsyncDisposable
+    public sealed class SubscriptionGroup : IDisposable, IAsyncDisposable
     {
         internal readonly struct ContextSubscriptionDebugSnapshot
         {
@@ -20,9 +20,9 @@ namespace PullSub.Core
             public bool IsQueue { get; }
         }
 
-        internal readonly struct ContextDebugSnapshot
+        internal readonly struct GroupDebugSnapshot
         {
-            public ContextDebugSnapshot(string debugLabel, ContextSubscriptionDebugSnapshot[] subscriptions)
+            public GroupDebugSnapshot(string debugLabel, ContextSubscriptionDebugSnapshot[] subscriptions)
             {
                 DebugLabel = debugLabel;
                 Subscriptions = subscriptions;
@@ -73,12 +73,12 @@ namespace PullSub.Core
             }
         }
 
-        private sealed class ContextSubscriptionLease : IDisposable
+        private sealed class SubscriptionGroupLease : IDisposable
         {
             private readonly Func<CancellationToken, Task<PullSubUnsubscribeResult>> _unsubscribeAsync;
             private readonly Action _dispose;
 
-            public ContextSubscriptionLease(
+            public SubscriptionGroupLease(
                 string topic,
                 Func<CancellationToken, Task<PullSubUnsubscribeResult>> unsubscribeAsync,
                 Action dispose)
@@ -104,13 +104,13 @@ namespace PullSub.Core
         private readonly PullSubRuntime _runtime;
         private readonly object _gate = new object();
         private readonly HashSet<SubscriptionKey> _inFlightTopics = new HashSet<SubscriptionKey>();
-        private readonly Dictionary<SubscriptionKey, ContextSubscriptionLease> _activeSubscriptions
-            = new Dictionary<SubscriptionKey, ContextSubscriptionLease>();
+        private readonly Dictionary<SubscriptionKey, SubscriptionGroupLease> _activeSubscriptions
+            = new Dictionary<SubscriptionKey, SubscriptionGroupLease>();
         private string _debugLabel;
 
         private int _disposed;
 
-        internal CompositeSubscription(PullSubRuntime runtime)
+        internal SubscriptionGroup(PullSubRuntime runtime)
         {
             _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         }
@@ -125,7 +125,7 @@ namespace PullSub.Core
             }
         }
 
-        internal ContextDebugSnapshot GetDebugSnapshot()
+        internal GroupDebugSnapshot GetDebugSnapshot()
         {
             lock (_gate)
             {
@@ -138,7 +138,7 @@ namespace PullSub.Core
                         pair.Key.Kind == SubscriptionKind.Queue);
                 }
 
-                return new ContextDebugSnapshot(_debugLabel, subscriptions);
+                return new GroupDebugSnapshot(_debugLabel, subscriptions);
             }
         }
 
@@ -202,7 +202,7 @@ namespace PullSub.Core
             if (shouldCleanupImmediately)
             {
                 await handle.UnsubscribeAsync(CancellationToken.None).ConfigureAwait(false);
-                throw new ObjectDisposedException(nameof(CompositeSubscription));
+                throw new ObjectDisposedException(nameof(SubscriptionGroup));
             }
 
             return handle;
@@ -383,7 +383,7 @@ namespace PullSub.Core
             if (shouldCleanupImmediately)
             {
                 await registration.UnsubscribeAsync(CancellationToken.None).ConfigureAwait(false);
-                throw new ObjectDisposedException(nameof(CompositeSubscription));
+                throw new ObjectDisposedException(nameof(SubscriptionGroup));
             }
 
             return registration;
@@ -423,7 +423,7 @@ namespace PullSub.Core
             SubscriptionKey key,
             CancellationToken cancellationToken)
         {
-            ContextSubscriptionLease subscription;
+            SubscriptionGroupLease subscription;
 
             lock (_gate)
             {
@@ -441,9 +441,9 @@ namespace PullSub.Core
             if (Interlocked.Exchange(ref _disposed, 1) != 0)
                 return;
 
-            CompositeSubscriptionDebugTracker.Unregister(_runtime, this);
+            SubscriptionGroupDebugTracker.Unregister(_runtime, this);
 
-            ContextSubscriptionLease[] subscriptions;
+            SubscriptionGroupLease[] subscriptions;
             lock (_gate)
             {
                 subscriptions = _activeSubscriptions.Values.ToArray();
@@ -465,9 +465,9 @@ namespace PullSub.Core
             if (Interlocked.Exchange(ref _disposed, 1) != 0)
                 return;
 
-            CompositeSubscriptionDebugTracker.Unregister(_runtime, this);
+            SubscriptionGroupDebugTracker.Unregister(_runtime, this);
 
-            ContextSubscriptionLease[] subscriptions;
+            SubscriptionGroupLease[] subscriptions;
             lock (_gate)
             {
                 subscriptions = _activeSubscriptions.Values.ToArray();
@@ -486,23 +486,23 @@ namespace PullSub.Core
             return Volatile.Read(ref _disposed) != 0;
         }
 
-        private static ContextSubscriptionLease CreateLease<T>(DataSubscription<T> handle)
+        private static SubscriptionGroupLease CreateLease<T>(DataSubscription<T> handle)
         {
             if (handle == null)
                 throw new ArgumentNullException(nameof(handle));
 
-            return new ContextSubscriptionLease(
+            return new SubscriptionGroupLease(
                 handle.Topic,
                 handle.UnsubscribeAsync,
                 handle.Dispose);
         }
 
-        private static ContextSubscriptionLease CreateLease(QueueSubscription subscription)
+        private static SubscriptionGroupLease CreateLease(QueueSubscription subscription)
         {
             if (subscription == null)
                 throw new ArgumentNullException(nameof(subscription));
 
-            return new ContextSubscriptionLease(
+            return new SubscriptionGroupLease(
                 subscription.Topic,
                 subscription.UnsubscribeAsync,
                 subscription.Dispose);
@@ -511,7 +511,7 @@ namespace PullSub.Core
         private void ThrowIfDisposed_NoLock()
         {
             if (IsDisposed_NoLock())
-                throw new ObjectDisposedException(nameof(CompositeSubscription));
+                throw new ObjectDisposedException(nameof(SubscriptionGroup));
         }
     }
 }

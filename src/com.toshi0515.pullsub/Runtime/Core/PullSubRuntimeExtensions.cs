@@ -6,13 +6,13 @@ namespace PullSub.Core
 {
     public static class PullSubRuntimeExtensions
     {
-        public static CompositeSubscription CreateContext(this PullSubRuntime runtime)
+        public static SubscriptionGroup CreateGroup(this PullSubRuntime runtime)
         {
             if (runtime == null)
                 throw new ArgumentNullException(nameof(runtime));
 
-            var context = new CompositeSubscription(runtime);
-            CompositeSubscriptionDebugTracker.Register(runtime, context);
+            var context = new SubscriptionGroup(runtime);
+            SubscriptionGroupDebugTracker.Register(runtime, context);
             return context;
         }
 

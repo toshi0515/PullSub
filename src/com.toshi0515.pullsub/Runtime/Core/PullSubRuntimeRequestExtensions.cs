@@ -121,7 +121,7 @@ namespace PullSub.Core
         }
 
         public static Task<TResponse> RequestAsync<TRequest, TResponse>(
-            this CompositeSubscription context,
+            this SubscriptionGroup context,
             IRequestTopic<TRequest, TResponse> topic,
             TRequest request,
             CancellationToken cancellationToken = default)
@@ -133,7 +133,7 @@ namespace PullSub.Core
         }
 
         public static Task<TResponse> RequestAsync<TRequest, TResponse>(
-            this CompositeSubscription context,
+            this SubscriptionGroup context,
             IRequestTopic<TRequest, TResponse> topic,
             TRequest request,
             TimeSpan timeout,
@@ -296,7 +296,7 @@ namespace PullSub.Core
         }
 
         public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
-            this CompositeSubscription context,
+            this SubscriptionGroup context,
             IRequestTopic<TRequest, TResponse> topic,
             Func<TRequest, CancellationToken, ValueTask<TResponse>> handler,
             CancellationToken cancellationToken = default)
@@ -305,7 +305,7 @@ namespace PullSub.Core
         }
 
         public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
-            this CompositeSubscription context,
+            this SubscriptionGroup context,
             IRequestTopic<TRequest, TResponse> topic,
             QueueOptions options,
             Func<TRequest, CancellationToken, ValueTask<TResponse>> handler,
@@ -323,7 +323,7 @@ namespace PullSub.Core
         }
 
         public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
-            this CompositeSubscription context,
+            this SubscriptionGroup context,
             IRequestTopic<TRequest, TResponse> topic,
             Func<TRequest, RequestContext, CancellationToken, ValueTask<TResponse>> handler,
             CancellationToken cancellationToken = default)
@@ -332,7 +332,7 @@ namespace PullSub.Core
         }
 
         public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
-            this CompositeSubscription context,
+            this SubscriptionGroup context,
             IRequestTopic<TRequest, TResponse> topic,
             QueueOptions options,
             Func<TRequest, RequestContext, CancellationToken, ValueTask<TResponse>> handler,
@@ -350,7 +350,7 @@ namespace PullSub.Core
         }
 
         public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
-            this CompositeSubscription context,
+            this SubscriptionGroup context,
             IRequestTopic<TRequest, TResponse> topic,
             Func<TRequest, ReplySender<TResponse>, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
@@ -359,7 +359,7 @@ namespace PullSub.Core
         }
 
         public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
-            this CompositeSubscription context,
+            this SubscriptionGroup context,
             IRequestTopic<TRequest, TResponse> topic,
             QueueOptions options,
             Func<TRequest, ReplySender<TResponse>, CancellationToken, ValueTask> handler,
@@ -389,7 +389,7 @@ namespace PullSub.Core
         }
 
         public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
-            this CompositeSubscription context,
+            this SubscriptionGroup context,
             IRequestTopic<TRequest, TResponse> topic,
             Func<TRequest, RequestContext, ReplySender<TResponse>, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
@@ -398,7 +398,7 @@ namespace PullSub.Core
         }
 
         public static Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
-            this CompositeSubscription context,
+            this SubscriptionGroup context,
             IRequestTopic<TRequest, TResponse> topic,
             QueueOptions options,
             Func<TRequest, RequestContext, ReplySender<TResponse>, CancellationToken, ValueTask> handler,

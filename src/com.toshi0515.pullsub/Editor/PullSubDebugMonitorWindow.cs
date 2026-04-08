@@ -35,20 +35,20 @@ namespace PullSub.Editor
             public double RatePerSecond;
         }
 
-        private readonly struct ContextDebugView
+        private readonly struct GroupDebugView
         {
-            public ContextDebugView(
-                CompositeSubscription context,
-                CompositeSubscription.ContextDebugSnapshot snapshot,
+            public GroupDebugView(
+                SubscriptionGroup group,
+                SubscriptionGroup.GroupDebugSnapshot snapshot,
                 MonoBehaviour owner)
             {
-                Context = context;
+                Group = group;
                 Snapshot = snapshot;
                 Owner = owner;
             }
 
-            public CompositeSubscription Context { get; }
-            public CompositeSubscription.ContextDebugSnapshot Snapshot { get; }
+            public SubscriptionGroup Group { get; }
+            public SubscriptionGroup.GroupDebugSnapshot Snapshot { get; }
             public MonoBehaviour Owner { get; }
         }
 
@@ -59,20 +59,20 @@ namespace PullSub.Editor
                 PullSubRuntime runtime,
                 PullSubRuntimeDebugSnapshot snapshot,
                 PullSubRuntimeTopicDebugSnapshot[] topics,
-                ContextDebugView[] contexts)
+                GroupDebugView[] groups)
             {
                 Client = client;
                 Runtime = runtime;
                 Snapshot = snapshot;
                 Topics = topics;
-                Contexts = contexts;
+                Groups = groups;
             }
 
             public PullSubMqttClient Client { get; }
             public PullSubRuntime Runtime { get; }
             public PullSubRuntimeDebugSnapshot Snapshot { get; }
             public PullSubRuntimeTopicDebugSnapshot[] Topics { get; }
-            public ContextDebugView[] Contexts { get; }
+            public GroupDebugView[] Groups { get; }
         }
 
         private readonly List<ClientDebugView> _views = new List<ClientDebugView>();
@@ -202,7 +202,7 @@ namespace PullSub.Editor
                         null,
                         default,
                         Array.Empty<PullSubRuntimeTopicDebugSnapshot>(),
-                        Array.Empty<ContextDebugView>()));
+                        Array.Empty<GroupDebugView>()));
                     continue;
                 }
 
@@ -253,26 +253,26 @@ namespace PullSub.Editor
             return topics;
         }
 
-        private static ContextDebugView[] BuildContextViews(PullSubRuntime runtime)
+        private static GroupDebugView[] BuildContextViews(PullSubRuntime runtime)
         {
-            var contexts = CompositeSubscriptionDebugTracker.Snapshot(runtime);
-            if (contexts.Length == 0)
-                return Array.Empty<ContextDebugView>();
+            var groups = SubscriptionGroupDebugTracker.Snapshot(runtime);
+            if (groups.Length == 0)
+                return Array.Empty<GroupDebugView>();
 
-            var result = new ContextDebugView[contexts.Length];
-            for (var i = 0; i < contexts.Length; i++)
+            var result = new GroupDebugView[groups.Length];
+            for (var i = 0; i < groups.Length; i++)
             {
-                var context = contexts[i];
-                var snapshot = context.GetDebugSnapshot();
-                CompositeSubscriptionDebugRegistry.TryGetOwner(context, out var owner);
-                result[i] = new ContextDebugView(context, snapshot, owner);
+                var group = groups[i];
+                var snapshot = group.GetDebugSnapshot();
+                SubscriptionGroupOwnerDebugRegistry.TryGetOwner(group, out var owner);
+                result[i] = new GroupDebugView(group, snapshot, owner);
             }
 
-            Array.Sort(result, CompareContextViews);
+            Array.Sort(result, CompareGroupViews);
             return result;
         }
 
-        private static int CompareContextViews(ContextDebugView a, ContextDebugView b)
+        private static int CompareGroupViews(GroupDebugView a, GroupDebugView b)
         {
             var left = string.IsNullOrWhiteSpace(a.Snapshot.DebugLabel) ? "(no label)" : a.Snapshot.DebugLabel;
             var right = string.IsNullOrWhiteSpace(b.Snapshot.DebugLabel) ? "(no label)" : b.Snapshot.DebugLabel;
@@ -281,7 +281,7 @@ namespace PullSub.Editor
             if (compare != 0)
                 return compare;
 
-            return a.Context.GetHashCode().CompareTo(b.Context.GetHashCode());
+            return a.Group.GetHashCode().CompareTo(b.Group.GetHashCode());
         }
 
         private void UpdateTopicRates(int clientId, PullSubRuntimeTopicDebugSnapshot[] topics, double now)
@@ -476,7 +476,7 @@ namespace PullSub.Editor
                 DrawReconnectSection(snapshot);
                 DrawRequestSection(snapshot.Request, snapshot.InboundOversizeDropCount);
 
-                DrawContextSection(client.GetInstanceID(), snapshot.CapturedAtUtc, view.Topics, view.Contexts);
+                DrawContextSection(client.GetInstanceID(), snapshot.CapturedAtUtc, view.Topics, view.Groups);
 
                 EditorGUILayout.Space(4f);
                 EditorGUILayout.LabelField("Topics", EditorStyles.boldLabel);
@@ -589,17 +589,17 @@ namespace PullSub.Editor
             int clientId,
             DateTime capturedAtUtc,
             PullSubRuntimeTopicDebugSnapshot[] topics,
-            ContextDebugView[] contexts)
+            GroupDebugView[] groups)
         {
-            if (contexts.Length == 0)
+            if (groups.Length == 0)
                 return;
 
             EditorGUILayout.Space(4f);
-            EditorGUILayout.LabelField("Contexts", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Groups", EditorStyles.boldLabel);
 
-            for (var i = 0; i < contexts.Length; i++)
+            for (var i = 0; i < groups.Length; i++)
             {
-                var contextView = contexts[i];
+                var contextView = groups[i];
                 var label = string.IsNullOrWhiteSpace(contextView.Snapshot.DebugLabel)
                     ? "(no label)"
                     : contextView.Snapshot.DebugLabel;

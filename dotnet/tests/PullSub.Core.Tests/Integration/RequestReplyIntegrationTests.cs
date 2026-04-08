@@ -638,7 +638,7 @@ namespace PullSub.Core.Tests.Integration
             await runtime.StartAsync();
             await runtime.WaitUntilConnectedAsync();
 
-            await using var context = runtime.CreateContext();
+            await using var context = runtime.CreateGroup();
             await using var responder = await context.RespondAsync(
                 topic,
                 (request, ct) => new ValueTask<int>(request + 2));

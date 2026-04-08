@@ -5,36 +5,36 @@ using UnityEngine;
 
 namespace PullSub.Bridge
 {
-    public static class CompositeSubscriptionUnityExtensions
+    public static class SubscriptionGroupUnityExtensions
     {
-        public static CompositeSubscription AddTo(
-            this CompositeSubscription context,
+        public static SubscriptionGroup AddTo(
+            this SubscriptionGroup group,
             MonoBehaviour behaviour)
         {
-            if (context == null)
-                throw new ArgumentNullException(nameof(context));
+            if (group == null)
+                throw new ArgumentNullException(nameof(group));
 
             if (behaviour == null)
                 throw new ArgumentNullException(nameof(behaviour));
 
-            behaviour.destroyCancellationToken.Register(context.Dispose);
+            behaviour.destroyCancellationToken.Register(group.Dispose);
 #if UNITY_EDITOR
-            context.SetDebugLabel(behaviour.gameObject != null ? behaviour.gameObject.name : behaviour.name);
-            CompositeSubscriptionDebugRegistry.Register(context, behaviour);
-            behaviour.destroyCancellationToken.Register(() => CompositeSubscriptionDebugRegistry.Unregister(context));
+            group.SetDebugLabel(behaviour.gameObject != null ? behaviour.gameObject.name : behaviour.name);
+            SubscriptionGroupOwnerDebugRegistry.Register(group, behaviour);
+            behaviour.destroyCancellationToken.Register(() => SubscriptionGroupOwnerDebugRegistry.Unregister(group));
 #endif
-            return context;
+            return group;
         }
 
-        public static CompositeSubscription AddTo(
-            this CompositeSubscription context,
+        public static SubscriptionGroup AddTo(
+            this SubscriptionGroup group,
             CancellationToken cancellationToken)
         {
-            if (context == null)
-                throw new ArgumentNullException(nameof(context));
+            if (group == null)
+                throw new ArgumentNullException(nameof(group));
 
-            cancellationToken.Register(context.Dispose);
-            return context;
+            cancellationToken.Register(group.Dispose);
+            return group;
         }
 
         public static DataSubscription<T> AddTo<T>(

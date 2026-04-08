@@ -34,7 +34,7 @@ namespace PullSub.Core.Tests.Integration
             await using var runtime = new PullSubRuntime(transport);
             await runtime.StartAsync();
 
-            await using var context = runtime.CreateContext();
+            await using var context = runtime.CreateGroup();
             var topic = PullSubTopic.Create("test/context/duplicate", new SampleClassCodec());
 
             var first = await context.SubscribeDataAsync(topic);
@@ -56,7 +56,7 @@ namespace PullSub.Core.Tests.Integration
             await using var runtime = new PullSubRuntime(transport);
             await runtime.StartAsync();
 
-            await using var context = runtime.CreateContext();
+            await using var context = runtime.CreateGroup();
             var topic = PullSubTopic.Create("test/context/parallel-duplicate", new SampleClassCodec());
 
             var task1 = context.SubscribeDataAsync(topic);

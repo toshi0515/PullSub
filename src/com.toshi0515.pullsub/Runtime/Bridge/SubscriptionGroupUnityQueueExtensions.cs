@@ -6,19 +6,19 @@ using PullSub.Core;
 
 namespace PullSub.Bridge
 {
-    public static class CompositeSubscriptionUnityQueueExtensions
+    public static class SubscriptionGroupUnityQueueExtensions
     {
         public static Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
-            this CompositeSubscription context,
+            this SubscriptionGroup group,
             ITopic<T> topic,
             Func<T, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
-            return SubscribeQueueOnMainThreadAsync(context, topic, QueueOptions.Default, handler, cancellationToken);
+            return SubscribeQueueOnMainThreadAsync(group, topic, QueueOptions.Default, handler, cancellationToken);
         }
 
         public static Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
-            this CompositeSubscription context,
+            this SubscriptionGroup group,
             ITopic<T> topic,
             Func<T, ValueTask> handler,
             CancellationToken cancellationToken = default)
@@ -26,11 +26,11 @@ namespace PullSub.Bridge
             if (handler == null)
                 throw new ArgumentNullException(nameof(handler));
 
-            return SubscribeQueueOnMainThreadAsync(context, topic, QueueOptions.Default, (message, _) => handler(message), cancellationToken);
+            return SubscribeQueueOnMainThreadAsync(group, topic, QueueOptions.Default, (message, _) => handler(message), cancellationToken);
         }
 
         public static Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
-            this CompositeSubscription context,
+            this SubscriptionGroup group,
             ITopic<T> topic,
             Action<T, CancellationToken> handler,
             CancellationToken cancellationToken = default)
@@ -39,7 +39,7 @@ namespace PullSub.Bridge
                 throw new ArgumentNullException(nameof(handler));
 
             return SubscribeQueueOnMainThreadAsync(
-                context,
+                group,
                 topic,
                 QueueOptions.Default,
                 (message, ct) =>
@@ -51,7 +51,7 @@ namespace PullSub.Bridge
         }
 
         public static Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
-            this CompositeSubscription context,
+            this SubscriptionGroup group,
             ITopic<T> topic,
             Action<T> handler,
             CancellationToken cancellationToken = default)
@@ -60,7 +60,7 @@ namespace PullSub.Bridge
                 throw new ArgumentNullException(nameof(handler));
 
             return SubscribeQueueOnMainThreadAsync(
-                context,
+                group,
                 topic,
                 QueueOptions.Default,
                 (message, _) =>
@@ -72,14 +72,14 @@ namespace PullSub.Bridge
         }
 
         public static Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
-            this CompositeSubscription context,
+            this SubscriptionGroup group,
             ITopic<T> topic,
             QueueOptions options,
             Func<T, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken = default)
         {
-            if (context == null)
-                throw new ArgumentNullException(nameof(context));
+            if (group == null)
+                throw new ArgumentNullException(nameof(group));
 
             if (topic == null)
                 throw new ArgumentNullException(nameof(topic));
@@ -90,7 +90,7 @@ namespace PullSub.Bridge
             if (handler == null)
                 throw new ArgumentNullException(nameof(handler));
 
-            return context.SubscribeQueueAsync(
+            return group.SubscribeQueueAsync(
                 topic,
                 options,
                 async (message, ct) =>
@@ -102,7 +102,7 @@ namespace PullSub.Bridge
         }
 
         public static Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
-            this CompositeSubscription context,
+            this SubscriptionGroup group,
             ITopic<T> topic,
             QueueOptions options,
             Func<T, ValueTask> handler,
@@ -111,11 +111,11 @@ namespace PullSub.Bridge
             if (handler == null)
                 throw new ArgumentNullException(nameof(handler));
 
-            return SubscribeQueueOnMainThreadAsync(context, topic, options, (message, _) => handler(message), cancellationToken);
+            return SubscribeQueueOnMainThreadAsync(group, topic, options, (message, _) => handler(message), cancellationToken);
         }
 
         public static Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
-            this CompositeSubscription context,
+            this SubscriptionGroup group,
             ITopic<T> topic,
             QueueOptions options,
             Action<T, CancellationToken> handler,
@@ -125,7 +125,7 @@ namespace PullSub.Bridge
                 throw new ArgumentNullException(nameof(handler));
 
             return SubscribeQueueOnMainThreadAsync(
-                context,
+                group,
                 topic,
                 options,
                 (message, ct) =>
@@ -137,7 +137,7 @@ namespace PullSub.Bridge
         }
 
         public static Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
-            this CompositeSubscription context,
+            this SubscriptionGroup group,
             ITopic<T> topic,
             QueueOptions options,
             Action<T> handler,
@@ -147,7 +147,7 @@ namespace PullSub.Bridge
                 throw new ArgumentNullException(nameof(handler));
 
             return SubscribeQueueOnMainThreadAsync(
-                context,
+                group,
                 topic,
                 options,
                 (message, _) =>
