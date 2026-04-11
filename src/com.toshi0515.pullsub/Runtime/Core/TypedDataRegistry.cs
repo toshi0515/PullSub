@@ -4,9 +4,8 @@ using System.Collections.Generic;
 namespace PullSub.Core
 {
     /// <summary>
-    /// トピックごとの型付きデータ購読登録を管理します。
-    /// 1 トピック 1 型の制約を強制し、Codec の decode クロージャと
-    /// <see cref="TypedTopicCache{T}"/> を紐付けます。
+    /// Manages typed data subscription registrations per topic.
+    /// Enforces a one-topic-one-type constraint and links the codec's decode closure with <see cref="TypedTopicCache{T}"/>.
     /// </summary>
     internal sealed class TypedDataRegistry
     {
@@ -30,7 +29,7 @@ namespace PullSub.Core
         {
             public Type ValueType { get; }
 
-            /// <summary>object の実体は TypedTopicCache&lt;T&gt;</summary>
+            /// <summary>The actual object is <see cref="TypedTopicCache{T}"/></summary>
             public ITypedTopicCache Cache { get; }
 
             public int RefCount;
@@ -45,8 +44,8 @@ namespace PullSub.Core
             public abstract bool TryDecodeAndUpdate(ReadOnlySpan<byte> payload);
 
             /// <summary>
-            /// 既存 Codec と新規 Codec の互換性を検証します。
-            /// 同値と判定できる場合のみ true を返します。
+            /// Validates compatibility between the existing codec and a new codec.
+            /// Returns true only if they are considered equivalent.
             /// </summary>
             public abstract bool IsEquivalentCodec(object newCodec);
         }
@@ -84,11 +83,11 @@ namespace PullSub.Core
             = new Dictionary<string, TopicEntry>(StringComparer.Ordinal);
 
         /// <summary>
-        /// トピックを型 T / Codec で登録します。
-        /// 同一トピックに異なる型が登録されていた場合は <see cref="InvalidOperationException"/> を送出します。
-        /// 同一トピック・同一型でも Codec が同値でない場合は例外を送出します。
+        /// Registers a topic with type T and codec.
+        /// Throws <see cref="InvalidOperationException"/> if a different type is already registered for the same topic.
+        /// Throws an exception if the codec is not equivalent for the same topic and type.
         /// </summary>
-        /// <returns>true のとき、このトピックの最初の登録（ネットワーク購読を開始すべき）</returns>
+        /// <returns>true if this is the first registration for the topic (network subscription should start)</returns>
         public bool Register<T>(string topic, IPayloadCodec<T> codec, out TypedTopicCache<T> cache)
         {
             lock (_gate)
@@ -119,9 +118,9 @@ namespace PullSub.Core
         }
 
         /// <summary>
-        /// 参照カウントを 1 減らします。
+        /// Decrements the reference count by 1.
         /// </summary>
-        /// <returns>true のとき、最後の参照が解放された（ネットワーク購読解除すべき）</returns>
+        /// <returns>true if the last reference has been released (network subscription should be cancelled)</returns>
         public bool Unregister(string topic)
         {
             ITypedTopicCache removedCache = null;
@@ -210,7 +209,7 @@ namespace PullSub.Core
             return result;
         }
 
-        /// <summary>全キャッシュの待機タスクをキャンセルし、登録を消去します。</summary>
+        /// <summary>Cancels all wait tasks and clears registrations.</summary>
         public void CancelAll()
         {
             List<ITypedTopicCache> caches;

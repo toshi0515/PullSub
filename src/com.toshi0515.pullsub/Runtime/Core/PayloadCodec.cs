@@ -4,9 +4,8 @@ using System.Buffers;
 namespace PullSub.Core
 {
     /// <summary>
-    /// 型付きペイロード Codec の標準インターフェースです。
-    /// エンコードは <see cref="IBufferWriter{T}"/> への書き込み契約を採用し、
-    /// 送信前の中間配列生成を避けます。
+    /// Standard typed payload codec interface.
+    /// The encode contract uses <see cref="IBufferWriter{T}"/> to avoid intermediate array allocation before sending.
     /// </summary>
     public interface IPayloadCodec<T>
     {
@@ -15,8 +14,8 @@ namespace PullSub.Core
     }
 
     /// <summary>
-    /// 既存インスタンスを再利用する in-place decode 契約です。
-    /// class payload を高頻度受信で使う場合の GC 抑制を目的とします。
+    /// [Experimental] In-place decode contract that reuses existing instances.
+    /// Designed to reduce GC pressure when using class payloads with high-frequency reception.
     /// </summary>
     public interface IPayloadInPlaceCodec<T> : IPayloadCodec<T>
     {

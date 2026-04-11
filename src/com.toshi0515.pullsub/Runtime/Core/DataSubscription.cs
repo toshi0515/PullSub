@@ -18,31 +18,29 @@ namespace PullSub.Core
         }
 
         /// <summary>
-        /// 最新値を返します。データ未到着の場合は default(T) を返します。
-        /// Data API は in-place 更新前提のため、参照型 T の場合は
-        /// 取得した参照をフレーム間で保持しないでください。
+        /// Returns the latest value. Returns default(T) if no data has arrived yet.
         /// </summary>
         public T Value => _cache.TryGet(out var v, out _) ? v : default;
 
         /// <summary>
-        /// 最新データの発生時刻（世界標準時）を返します。
-        /// JSON ペイロードに timestamp が含まれていればそれを、なければ受信時刻を返します。
-        /// データ未到着の場合は default(DateTime) を返します。
+        /// Returns the timestamp (UTC) of the latest data.
+        /// Uses the timestamp field from the JSON payload if available, otherwise uses the wall clock time when the message was received.
+        /// Returns default(DateTime) if no data has arrived yet.
         /// </summary>
         public System.DateTime TimestampUtc => _cache.TryGet(out _, out var ts) ? ts : default;
 
         /// <summary>
-        /// 端末のローカル時間に変換された発生時刻を返します。
+        /// Returns the timestamp converted to the local time of this device.
         /// </summary>
         public System.DateTime TimestampLocal => TimestampUtc.ToLocalTime();
 
         /// <summary>
-        /// データが一度でも到着しているかどうか。
+        /// Returns true if at least one message has been received.
         /// </summary>
         public bool HasValue => _cache.TryGet(out _, out _);
 
         /// <summary>
-        /// 最新値を取得します。未到着の場合は false を返します。
+        /// Tries to get the latest value. Returns false if no data has arrived yet.
         /// </summary>
         public bool TryGet(out T value)
         {
@@ -50,7 +48,7 @@ namespace PullSub.Core
         }
 
         /// <summary>
-        /// 最新値と発生時刻（UTC）を取得します。未到着の場合は false を返します。
+        /// Tries to get the latest value and its timestamp (UTC). Returns false if no data has arrived yet.
         /// </summary>
         public bool TryGet(out T value, out System.DateTime timestampUtc)
         {
@@ -58,19 +56,19 @@ namespace PullSub.Core
         }
 
         /// <summary>
-        /// データ未到着のときに返す値を明示したい場合。
+        /// Returns the latest value, or the specified fallback value if no data has arrived yet.
         /// </summary>
         public T GetValueOrDefault(T fallback) =>
             _cache.TryGet(out var v, out _) ? v : fallback;
 
         /// <summary>
-        /// 購読中のトピック名。
+        /// The name of the subscribed topic.
         /// </summary>
         public string Topic => _topic;
 
         /// <summary>
-        /// 購読が有効でデータが到着済みの場合 true。
-        /// UnsubscribeDataAsync または DisposeAsync の後は false になります。
+        /// Returns true if the subscription is active and data has arrived.
+        /// Becomes false after calling UnsubscribeAsync or DisposeAsync.
         /// </summary>
         public bool IsValid => !_runtime.IsDisposeRequested
             && _cache.TryGet(out _, out _);

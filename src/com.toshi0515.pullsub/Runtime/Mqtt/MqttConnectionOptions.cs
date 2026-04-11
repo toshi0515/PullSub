@@ -1,12 +1,12 @@
 using System;
 using System.Security.Authentication;
-using PullSub.Core; 
+using PullSub.Core;
 
 namespace PullSub.Mqtt
 {
     public enum MqttTransportKind
     {
-        /// <summary>MQTT over TCP（既定）</summary>
+        /// <summary>MQTT over TCP (default)</summary>
         Tcp = 0,
         /// <summary>MQTT over WebSocket (ws://)</summary>
         Ws = 1,
@@ -67,14 +67,14 @@ namespace PullSub.Mqtt
         public MqttTransportKind Kind { get; }
 
         /// <summary>
-        /// WebSocket のパス。Kind=Tcp では未使用。
-        /// Kind=Ws/Wss で未指定の場合は "/" に正規化されます。
+        /// WebSocket path. Not used when Kind=Tcp.
+        /// Kind=Ws/Wss: Path is normalized to "/" if not specified.
         /// </summary>
         public string WebSocketPath { get; }
 
         /// <summary>
-        /// WebSocket のサブプロトコル。Kind=Tcp では未使用。
-        /// Kind=Ws/Wss で未指定の場合は "mqtt" が使われます。
+        /// WebSocket subprotocol. Not used when Kind=Tcp.
+        /// Kind=Ws/Wss: Subprotocol is "mqtt" if not specified.
         /// </summary>
         public string WebSocketSubprotocol { get; }
 

@@ -10,9 +10,9 @@ namespace PullSub.Bridge
     [Serializable]
     public sealed class PullSubClientTlsSettings
     {
-        [Tooltip("TLS オプションを有効化します。\n" +
-            "Wss トランスポートを使用する場合: Enabled を ON にすることで AllowUntrustedCertificates などの証明書オプションが適用されます。" +
-            " Enabled = OFF のままでも wss:// 接続は TLS で行われますが証明書オプションはすべて無視されます（OS デフォルトの厳格な証明書検証が適用されます）。")]
+        [Tooltip("Enable explicit TLS options.\n" +
+            "For Wss transport: Enabling this allows certificate options (e.g. AllowUntrusted) to be applied. " +
+            "If Disabled, wss:// connections still use TLS but ignore these options, using strict OS default validation instead.")]
         [SerializeField] private bool _enabled;
 
         [Tooltip("For development/testing only. Do not enable in production unless you fully understand the risk.")]
@@ -102,13 +102,13 @@ namespace PullSub.Bridge
     [Serializable]
     public sealed class PullSubClientTransportSettings
     {
-        [Tooltip("接続トランスポートプロトコルを選択します。\nTcp: MQTT over TCP（既定）\nWs: MQTT over WebSocket（ws://）\nWss: MQTT over Secure WebSocket（wss://）")]
+        [Tooltip("Select connection transport protocol.\nTcp: MQTT over TCP (default)\nWs: MQTT over WebSocket (ws://)\nWss: MQTT over Secure WebSocket (wss://)")]
         [SerializeField] private MqttTransportKind _kind = MqttTransportKind.Tcp;
 
-        [Tooltip("WebSocket のパス（Ws/Wss のみ）。省略すると '/' が使われます。ブローカーに合わせて設定してください（例: /mqtt）。")]
+        [Tooltip("WebSocket path (Ws/Wss only). Defaults to '/'. Configure according to your broker (e.g. /mqtt).")]
         [SerializeField] private string _webSocketPath = "";
 
-        [Tooltip("WebSocket のサブプロトコル（Ws/Wss のみ）。省略すると 'mqtt' が使われます。")]
+        [Tooltip("WebSocket subprotocol (Ws/Wss only). Defaults to 'mqtt'.")]
         [SerializeField] private string _webSocketSubprotocol = "";
 
         public MqttTransportOptions ToCoreOptions()

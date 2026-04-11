@@ -89,13 +89,12 @@ namespace PullSub.Mqtt
                     return ApplyTcpTlsOptions(clientOptionsBuilder, tls);
 
                 case MqttTransportKind.Ws:
-                    // Ws + TLS の組み合わせは MqttConnectionOptions の生成時に fail-fast される。
+                    // Ws + TLS combinations are handled via fail-fast in MqttConnectionOptions validation.
                     return clientOptionsBuilder;
 
                 case MqttTransportKind.Wss:
-                    // Wss: 証明書系オプション + TargetHost を適用。
-                    // SslProtocols は WebSocket 経路では適用できないため無視する
-                    // （MQTTnet が WebSocket の TLS ネゴシエーションを管理するため）。
+                    // Wss: Apply certificate options and TargetHost.
+                    // SslProtocols is ignored for WebSocket as MQTTnet manages the underlying TLS negotiation.
                     return ApplyWssTlsOptions(clientOptionsBuilder, tls, logWarning);
 
                 default:
@@ -135,8 +134,8 @@ namespace PullSub.Mqtt
             if (tls.SslProtocols != SslProtocols.None)
             {
                 logWarning?.Invoke(
-                    "[MqttOptionsFactory] SslProtocols は WebSocket トランスポートでは適用されません（MQTTnet が TLS ネゴシエーションを管理するため）。" +
-                    " SslProtocols=None の設定を推奨します。");
+                    "[MqttOptionsFactory] SslProtocols is not applicable for WebSocket transports (negotiation is managed by MQTTnet). " +
+                    "Setting SslProtocols=None is recommended.");
             }
 
             return clientOptionsBuilder.WithTlsOptions(builder =>
@@ -147,11 +146,11 @@ namespace PullSub.Mqtt
                     .WithIgnoreCertificateChainErrors(tls.IgnoreCertificateChainErrors)
                     .WithIgnoreCertificateRevocationErrors(tls.IgnoreCertificateRevocationErrors);
 
-                // TargetHost (SNI) は WebSocket でも有効
+                // TargetHost (SNI) is supported for WebSockets.
                 if (!string.IsNullOrEmpty(tls.TargetHost))
                     builder.WithTargetHost(tls.TargetHost);
 
-                // SslProtocols は WebSocket TLS 経路では適用しない
+                // SslProtocols is managed by MQTTnet for WebSocket TLS paths.
             });
         }
 

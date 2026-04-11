@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 namespace PullSub.Core
 {
     /// <summary>
-    /// Async-disposable registration handle for a raw message handler loop.
+    /// Async-disposable registration handle for a message handler loop.
     /// </summary>
     public sealed class QueueSubscription
     {

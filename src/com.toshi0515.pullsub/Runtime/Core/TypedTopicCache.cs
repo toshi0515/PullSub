@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 namespace PullSub.Core
 {
     /// <summary>
-    /// <see cref="TypedTopicCache{T}"/> の型消去インターフェース。Dispose 時のキャンセルに使用します。
+    /// Type-erased interface for <see cref="TypedTopicCache{T}"/> used for cancellation during disposal.
     /// </summary>
     internal interface ITypedTopicCache
     {
@@ -15,7 +15,7 @@ namespace PullSub.Core
     }
 
     /// <summary>
-    /// 1 トピック 1 型のデータキャッシュ。最新値と初回到着待機シグナルを型安全に管理します。
+    /// Type-safe data cache for one topic and one type. Manages the latest value and the first arrival wait signal.
     /// </summary>
     internal sealed class TypedTopicCache<T> : ITypedTopicCache
     {

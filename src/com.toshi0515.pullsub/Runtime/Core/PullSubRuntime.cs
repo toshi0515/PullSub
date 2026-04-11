@@ -291,7 +291,6 @@ namespace PullSub.Core
         }
 
         /// <summary>
-        /// Ensures the managed client has been started.
         /// This method guarantees runtime start, but does not guarantee broker connection completion.
         /// Use WaitUntilConnectedAsync when the caller needs Ready state.
         /// </summary>

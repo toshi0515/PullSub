@@ -5,20 +5,20 @@ using System.Text;
 namespace PullSub.Core
 {
     /// <summary>
-    /// テキスト形式ペイロードの型付き Codec 向け抽象基底クラス。
-    /// UTF-8 変換・エラーハンドリング・timestamp 正規化を提供します。
-    /// 派生クラスは <see cref="TryParsePayload"/> と <see cref="FormatPayload"/> のみ実装してください。
+    /// Base class for typed codecs for text-based payloads.
+    /// Provides UTF-8 conversion, error handling, and timestamp normalization.
+    /// Derived classes should implement only <see cref="TryParsePayload"/> and <see cref="FormatPayload"/>.
     /// </summary>
     public abstract class TextPayloadCodec<T> : IPayloadCodec<T>
     {
-        /// <summary>受信テキストを value と timestamp に変換します。</summary>
+        /// <summary>Converts received text to value and timestamp.</summary>
         protected abstract bool TryParsePayload(
             string text,
             out T value,
             out DateTime timestampUtc,
             out string error);
 
-        /// <summary>timestamp と value を送信テキストに変換します。</summary>
+        /// <summary>Converts timestamp and value to text for transmission.</summary>
         protected abstract string FormatPayload(DateTime timestampUtc, T value);
 
         public virtual void Encode(DateTime timestampUtc, T value, IBufferWriter<byte> bufferWriter)

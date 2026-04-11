@@ -40,7 +40,7 @@ namespace PullSub.Core
         }
 
         /// <summary>
-        /// 最後に受信したデータを取得します。SubscribeDataAsync&lt;T&gt; で購読済みであることが前提です。
+        /// Gets the latest received data. Assumes the topic has been subscribed via SubscribeDataAsync<T>.
         /// </summary>
         internal bool TryGetData<T>(string topic, out T value)
         {
@@ -48,8 +48,8 @@ namespace PullSub.Core
         }
 
         /// <summary>
-        /// 最後に受信したデータを、受信発生時刻(またはペイロード時刻)と共に取得します。
-        /// SubscribeDataAsync&lt;T&gt; で購読済みであることが前提です。
+        /// Gets the latest received data along with its timestamp (received time or payload timestamp).
+        /// Assumes the topic has been subscribed via SubscribeDataAsync<T>.
         /// </summary>
         internal bool TryGetData<T>(string topic, out T value, out System.DateTime timestampUtc)
         {
@@ -62,7 +62,7 @@ namespace PullSub.Core
         }
 
         /// <summary>
-        /// 最初のデータが到着するまで非同期に待機します。SubscribeDataAsync&lt;T&gt; で購読済みであることが前提です。
+        /// Asynchronously waits until the first message arrives. Assumes the topic has been subscribed via SubscribeDataAsync<T>.
         /// </summary>
         internal async Task<T> WaitForFirstDataAsync<T>(string topic, CancellationToken cancellationToken = default)
         {
@@ -85,8 +85,8 @@ namespace PullSub.Core
         }
 
         /// <summary>
-        /// トピックのデータハンドルを取得します。
-        /// SubscribeDataAsync&lt;T&gt; で購読済みであることが前提です。
+        /// Returns a data subscription handle for the topic.
+        /// Assumes the topic has been subscribed via SubscribeDataAsync<T>.
         /// </summary>
         internal DataSubscription<T> GetDataHandle<T>(string topic)
         {
