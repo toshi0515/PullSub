@@ -11,7 +11,7 @@ namespace PullSub.Core
     /// <c>timestamp</c> キーは予約済みです。T のプロパティに同名のフィールドを使用しないでください。
     /// T は JSON オブジェクトとしてシリアライズできる型（クラスまたは struct）である必要があります。
     /// </summary>
-    public sealed class FlatJsonPayloadCodec<T> : TextPayloadCodec<T>, IPayloadInPlaceCodec<T>
+    public sealed class FlatJsonPayloadCodec<T> : TextPayloadCodec<T>
     {
         private static readonly JsonSerializerOptions DefaultOptions = new JsonSerializerOptions
         {
@@ -117,35 +117,6 @@ namespace PullSub.Core
                 error = ex.Message;
                 return false;
             }
-        }
-
-        public bool TryDecodeInPlace(ReadOnlySpan<byte> payload, T destination, out DateTime timestampUtc, out string error)
-        {
-            if (!typeof(T).IsClass)
-            {
-                timestampUtc = default;
-                error = "in-place decode is only supported for class payload types.";
-                return false;
-            }
-
-            if (destination is null)
-            {
-                timestampUtc = default;
-                error = "destination instance is null.";
-                return false;
-            }
-
-            if (!TryDecode(payload, out var decoded, out timestampUtc, out error))
-                return false;
-
-            if (decoded is null)
-            {
-                error = "decoded payload is null.";
-                return false;
-            }
-
-            ObjectMemberCopier<T>.Copy(decoded, destination);
-            return true;
         }
 
         protected override string FormatPayload(DateTime timestampUtc, T value)

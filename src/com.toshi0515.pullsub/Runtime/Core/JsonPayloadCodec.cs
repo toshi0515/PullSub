@@ -9,7 +9,7 @@ namespace PullSub.Core
     /// JSON envelope 形式の標準型付き Codec。
     /// ペイロード形式は <c>{ "timestamp": "...", "data": { ...T のプロパティ... } }</c> です。
     /// </summary>
-    public sealed class JsonPayloadCodec<T> : TextPayloadCodec<T>, IPayloadInPlaceCodec<T>
+    public sealed class JsonPayloadCodec<T> : TextPayloadCodec<T>
     {
         private static readonly JsonSerializerOptions DefaultOptions = new JsonSerializerOptions
         {
@@ -125,35 +125,6 @@ namespace PullSub.Core
                 error = ex.Message;
                 return false;
             }
-        }
-
-        public bool TryDecodeInPlace(ReadOnlySpan<byte> payload, T destination, out DateTime timestampUtc, out string error)
-        {
-            if (!typeof(T).IsClass)
-            {
-                timestampUtc = default;
-                error = "in-place decode is only supported for class payload types.";
-                return false;
-            }
-
-            if (destination is null)
-            {
-                timestampUtc = default;
-                error = "destination instance is null.";
-                return false;
-            }
-
-            if (!TryDecode(payload, out var decoded, out timestampUtc, out error))
-                return false;
-
-            if (decoded is null)
-            {
-                error = "decoded payload is null.";
-                return false;
-            }
-
-            ObjectMemberCopier<T>.Copy(decoded, destination);
-            return true;
         }
 
         protected override string FormatPayload(DateTime timestampUtc, T value)

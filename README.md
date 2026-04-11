@@ -50,16 +50,17 @@ public class RobotController : MonoBehaviour
     private async void Start()
     {
         _positionSubscription = await _client.Runtime.SubscribeDataAsync(Topics.Position);
-        _positionSubscription.AddTo(this); // Automatic disposal on OnDestroy
+        _positionSubscription?.AddTo(this); // Automatic disposal on OnDestroy
     }
 
     private void Update()
     {
-        if (_positionSubscription != null &&_positionSubscription.TryGet(out var pos)) return;
-        // Access the latest value just like transform.position
-        transform.position = new Vector3(pos.X, pos.Y, pos.Z);
+        // Access the latest value
+        if (_positionSubscription?.TryGet(out var pos) == true)
+        {
+            transform.position = new Vector3(pos.X, pos.Y, pos.Z);
+        }
     }
-    // OnDestroy is handled automatically by AddTo(this)
 }
 ```
 
@@ -84,12 +85,15 @@ Data API is optimized for in-place latest-state reads:
 - Use Queue API when you need ordered history or event replay.
 
 ```csharp
-// Poll in Update() — just like transform.position
-private void Update()
-{
-    if (!_positionSubscription.TryGet(out var pos)) return;
-    transform.position = new Vector3(pos.X, pos.Y, pos.Z);
-}
+// Poll in Update()
+    private void Update()
+    {
+        // Access the latest value
+        if (_positionSubscription?.TryGet(out var pos) == true)
+        {
+            transform.position = new Vector3(pos.X, pos.Y, pos.Z);
+        }
+    }
 ```
 
 ### Queue API — for *events*
@@ -98,12 +102,14 @@ Use this for data where every message must be processed in order, such as comman
 
 ```csharp
 // Handle commands one by one
-var registration = await runtime.SubscribeQueueAsync(
+var queueSubscription = await runtime.SubscribeQueueAsync(
     Topics.Command,
     async (command, ct) => await robot.ExecuteAsync(command, ct));
 ```
 
-### Request-Reply API — for *RPC-like workflows*
+Note: You can only add one handler per topic. 
+
+### Request-Reply API — for *RPC-like workflows* (Experimental)
 
 Use this when you need one response per request, such as command execution acknowledgement,
 query-response operations, or remote validation.
@@ -148,6 +154,10 @@ await using var responder = await runtime.RespondAsync(
 ---
 
 ## Getting Started (Unity)
+
+### Install UniTask
+
+Install [UniTask](https://github.com/Cysharp/UniTask) as a Unity package.
 
 ### Install DLLs
 
@@ -206,7 +216,7 @@ public static class Topics
 }
 ```
 
-### 3. Direct Runtime Access with Subscription Group API (recommended)
+### 3. Subscribe and Access Data
 
 ```csharp
 using UnityEngine;
@@ -217,19 +227,17 @@ public class RobotController : MonoBehaviour
 {
     [SerializeField] private PullSubMqttClient _client;
 
+    private SubscriptionGroup _group; // SubscriptionGroup manages multiple subscriptions lifecycle
     private DataSubscription<Position> _positionSubscription;
 
     private async void Start()
     {
-        // PullSubMqttClient starts Runtime automatically on OnEnable by default.
-        // If Start On Enable is disabled, call Runtime.StartAsync manually.
-
         // Create a subscription group (manages multiple subscriptions)
-        var group = _client.Runtime.CreateGroup()
+        _group = _client.Runtime.CreateGroup()
             .AddTo(this);  // Automatic cleanup on OnDestroy
 
         // Subscribe data: returns DataSubscription<T>
-        _positionSubscription = await group.SubscribeDataAsync(Topics.Position);
+        _positionSubscription = await _group.SubscribeDataAsync(Topics.Position);
     }
 
     private void Update()
@@ -241,13 +249,11 @@ public class RobotController : MonoBehaviour
 }
 ```
 
-**Benefits of Subscription Group API:**
+**Subscription Group:**
 - `SubscriptionGroup` groups multiple subscriptions for batch cleanup
 - Built-in duplicate-topic prevention within a group
-- Automatic lifecycle binding with `AddTo(this)` (no manual CancellationTokenSource)
+- Automatic lifecycle binding with `AddTo(this)`
 - Safe for concurrent subscription requests
-
-Use `WaitForFirstDataAsync` only when you explicitly need strict first-arrival gating.
 
 ### 4. Handle Commands Using the Queue API with Subscription Group
 
@@ -255,15 +261,16 @@ Use `WaitForFirstDataAsync` only when you explicitly need strict first-arrival g
 public class CommandReceiver : MonoBehaviour
 {
     [SerializeField] private PullSubMqttClient _client;
+    private SubscriptionGroup _group;
 
     private async void Start()
     {
         // Create a group and bind to MonoBehaviour lifecycle
-        var group = _client.Runtime.CreateGroup()
+        _group = _client.Runtime.CreateGroup()
             .AddTo(this);  // Automatic cleanup on OnDestroy
 
         // Register Queue handler through group (tracked and auto-unsubscribed)
-        await group.SubscribeQueueAsync(
+        await _group.SubscribeQueueAsync(
             Topics.Command,
             async (command, ct) =>
             {
@@ -275,6 +282,14 @@ public class CommandReceiver : MonoBehaviour
                     Debug.LogError($"Handler registration failed: {t.Exception}");
             });
 
+        // Or use the extension method for Unity main thread
+        await _group.SubscribeQueueOnMainThreadAsync(
+            Topics.Command,
+            (command) =>
+            {
+                robot.Execute(command);
+            });
+
         // Later, if needed, stop just this handler while keeping other subscriptions active
         // await group.UnsubscribeQueueAsync(Topics.Command.TopicName, cancellationToken);
 
@@ -283,25 +298,21 @@ public class CommandReceiver : MonoBehaviour
 }
 ```
 
-**Or use Runtime directly** (manual lifecycle management):
+**Or use Runtime directly**
 ```csharp
-private QueueSubscription _registration;
+private QueueSubscription _sub;
 
 private async void Start()
 {
-    _registration = await _client.Runtime.SubscribeQueueAsync(
+    _sub = await _client.Runtime.SubscribeQueueAsync(
         Topics.Command,
         async (command, ct) =>
         {
             await robot.ExecuteAsync(command, ct);
         },
         destroyCancellationToken);
-}
 
-private async void OnDestroy()
-{
-    if (_registration != null)
-        await _registration.DisposeAsync();  // Idempotent: safe to call multiple times
+    _sub?.AddTo(this); // Automatic cleanup on OnDestroy
 }
 ```
 
@@ -321,8 +332,10 @@ await _client.Runtime.PublishDataAsync(Topics.Position, position);
 ### 6. Publish from IObservable<T> (Publisher-only helper)
 
 Use `ToPublisher()` to connect any `IObservable<T>` stream to PullSub publish.
+You can throttle or filter the stream before publishing. This can prevent excessive network traffic.
+
 This helper uses `IObservable<T>` / `IObserver<T>` from BCL, so it works with
-R3, UniRx, or System.Reactive streams.
+R3, UniRx, or System.Reactive streams. Use your favorite reactive stream library.
 
 ```csharp
 sensorStream
@@ -342,7 +355,7 @@ Notes:
 - Receive-side `ToObservable()` is intentionally not provided by the library.
     For receive reactive flows, compose from polling (`Update` / `EveryUpdate`) or use Queue API.
 
-### 7. Request-Reply (optional)
+### 7. Request-Reply (experimental)
 
 Define a request topic once, then use `RequestAsync` from a requester and `RespondAsync` from a responder.
 
@@ -375,11 +388,41 @@ await _client.Runtime.RespondAsync(
     });
 ```
 
+### 8. Runtime Monitoring (Editor)
+
+Use the monitor window to inspect all `PullSubMqttClient` instances in open scenes:
+
+- Open: `Tools > PullSub > Debug Monitor`
+
+**Sections:**
+
+- **Overview**: Scene name, broker address, connection state (Connected/Disconnected), Runtime state, queue handler diagnostics status
+- **Connection**: Client ID and policy, reconnect attempts, current delay, next retry time, last failure reason
+- **Request/Reply**: Pending request count, timeout/failure counters, reply inbox subscription status
+- **Topics**: Active topic list with subscriber counts (Data/Queue), message receive rate, data latency, QoS level
+- **Contexts**: Associated `PullSubContext` instances and their subscriptions
+- **Recently Removed**: Topics unsubscribed in the last 10 seconds
+
+**Warning Color (Orange) Indicates:**
+
+- Queue handler diagnostics are disabled
+- Connection is disconnected or reconnecting
+- Request/Reply failures detected (timeout, publish failed, setup failed, invalid reply-to, connection lost)
+- Data latency ≥ 1000ms (real-time performance degradation)
+- Inbound message drops due to oversized payloads
+
+**Notes:**
+
+- The monitor focuses on operational state, not payload contents.
+- Handler method names are intentionally not displayed.
+- Refresh interval: 0.3 seconds for near real-time updates.
+
+
 ---
 
 ## Quick Start — .NET
 
-Instantiate `PullSubRuntime` directly without the Unity Bridge. This lets you share code between Unity and edge devices such as Raspberry Pi.
+Instantiate `PullSubRuntime` directly. This lets you share code between Unity and edge devices such as Raspberry Pi.
 
 ```csharp
 using PullSub.Core;
@@ -421,7 +464,7 @@ while (!cts.IsCancellationRequested)
 // group and subscription automatically disposed via await using
 ```
 
-**Subscription Group API Benefits:**
+**Subscription Group:**
 - `SubscriptionGroup` groups multiple subscriptions for atomic cleanup
 - `await using` ensures async disposal completes (Network unsubscribe waits)
 - Type-safe via generic `SubscribeDataAsync<T>`
@@ -456,169 +499,6 @@ Notes:
 - Queue handler fault/active metrics may be unavailable outside Unity Editor. Check `snapshot.HasQueueHandlerDiagnostics`.
 - Snapshot polling is not free. For production, start with low frequency such as 1 Hz.
 - OpenTelemetry / HTTP endpoint integration is intentionally out of scope for this library. Build it on top of snapshot data.
-
----
-
-## Lifecycle Management — Best Practices
-
-PullSub provides `AddTo()` extensions and `SubscriptionGroup` to automatically manage subscription and handler lifecycles with MonoBehaviour and cancellation tokens, preventing resource leaks.
-
-### Queue Lease with AddTo (Unity)
-
-For component-owned handlers, register first and then bind the lease to the component lifecycle:
-
-```csharp
-using System;
-using System.Threading;
-using System.Threading.Tasks;
-using UnityEngine;
-using PullSub.Core;
-using PullSub.Bridge;
-
-public sealed class CommandHandler : MonoBehaviour
-{
-    [SerializeField] private PullSubMqttClient _client;
-
-    private QueueSubscription _lease;
-
-    private async void Start()
-    {
-        try
-        {
-            _lease = await _client.Runtime.SubscribeQueueAsync(
-                Topics.RobotCommand,
-                ExecuteCommandAsync);
-
-            // Auto-stop on OnDestroy.
-            _lease.AddTo(this);
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Queue handler registration failed: {ex}");
-        }
-    }
-
-    private static async ValueTask ExecuteCommandAsync(RobotCommand command, CancellationToken ct)
-    {
-        switch (command.Type)
-        {
-            case "move":
-                await Robot.MoveAsync(command.Payload, ct);
-                break;
-            case "rotate":
-                await Robot.RotateAsync(command.Payload, ct);
-                break;
-        }
-    }
-}
-```
-
-### Unified SubscriptionGroup for Data and Queue Subscriptions
-
-Use one `SubscriptionGroup` to manage Data subscriptions and Queue handlers together:
-
-```csharp
-using System;
-using System.Threading;
-using System.Threading.Tasks;
-using UnityEngine;
-using PullSub.Core;
-using PullSub.Bridge;
-
-public sealed class RobotController : MonoBehaviour
-{
-    [SerializeField] private PullSubMqttClient _client;
-
-    private SubscriptionGroup _group;
-    private DataSubscription<Position> _positionSubscription;
-
-    private async void Start()
-    {
-        try
-        {
-            _group = _client.Runtime.CreateGroup().AddTo(this);
-
-            _positionSubscription = await _group.SubscribeDataAsync(Topics.Position);
-
-            await _group.SubscribeQueueAsync(
-                Topics.RobotCommand,
-                HandleCommandAsync);
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Group initialization failed: {ex}");
-        }
-    }
-
-    private void Update()
-    {
-        if (_positionSubscription?.TryGet(out var pos) != true)
-            return;
-
-        transform.position = new Vector3(pos.X, pos.Y, pos.Z);
-    }
-
-    private async ValueTask HandleCommandAsync(RobotCommand command, CancellationToken ct)
-    {
-        if (_positionSubscription?.TryGet(out var currentPos) == true)
-            Debug.Log($"Current position before command: {currentPos}");
-
-        await Robot.ExecuteAsync(command, ct);
-    }
-
-    public Task<PullSubUnsubscribeResult> StopCommandHandlerAsync(CancellationToken ct = default)
-    {
-        if (_group == null)
-            return Task.FromResult(PullSubUnsubscribeResult.AlreadyCanceled);
-
-        return _group.UnsubscribeQueueAsync(Topics.RobotCommand.TopicName, ct);
-    }
-}
-```
-
-### Multiple Queue Handlers in One Group
-
-Register multiple handlers and keep selective stop capability:
-
-```csharp
-private async Task RegisterHandlersAsync(SubscriptionGroup group, CancellationToken ct)
-{
-    await group.SubscribeQueueAsync(Topics.Command, HandleCommandAsync, cancellationToken: ct);
-    await group.SubscribeQueueAsync(Topics.Log, HandleLogAsync, cancellationToken: ct);
-    await group.SubscribeQueueAsync(Topics.Alert, HandleAlertAsync, cancellationToken: ct);
-}
-
-private Task<PullSubUnsubscribeResult> StopOnlyCommandHandlerAsync(SubscriptionGroup group, CancellationToken ct)
-{
-    return group.UnsubscribeQueueAsync(Topics.Command.TopicName, ct);
-}
-```
-
-### Practical Rules
-
-If you bind lifetime with `AddTo(this)`, omit `cancellationToken: destroyCancellationToken` in subscribe/register calls unless you need earlier cancellation than `OnDestroy`.
-
-| Pattern | When to use | Notes |
-|---------|-------------|-------|
-| **`lease.AddTo(this)`** | Single Queue handler owned by one MonoBehaviour | Simplest Unity lifecycle binding |
-| **`group.AddTo(this)`** | Multiple Data + Queue registrations in one component | One owner, one cleanup point |
-| **`UnsubscribeQueueAsync(topic)`** | Stop only one Queue handler | Data subscriptions and other handlers keep running |
-| **`DisposeAsync()`** | Need completion guarantee for cleanup | Waits until unsubscribe/stop finishes |
-| **`Dispose()`** | Fire-and-forget teardown is acceptable | Fast, non-blocking, fault-observed path |
-
-### Runtime Monitoring (Editor)
-
-Use the monitor window to inspect all `PullSubMqttClient` instances in open scenes:
-
-- Open: `Tools > PullSub > Debug Monitor`
-- Scope: one panel per `PullSubMqttClient` (`scene`, `host:port`, `client id policy`)
-- Topic state: Data / Queue kind, Data `HasValue` + latest timestamp age, Queue active/faulted handler counts, dropped message count
-- Transition hint: recently removed topics are shown for the last 10 seconds
-
-Notes:
-
-- The monitor focuses on operational state, not payload value contents.
-- Handler method names are intentionally not displayed.
 
 ---
 
@@ -699,7 +579,7 @@ To avoid accidental defaults caused by schema drift, share the same DTO and topi
 
 ---
 
-## Connection Options
+## MQTT Connection Options
 
 Connection options are configured via `MqttConnectionOptions` and passed to `MqttTransport`. In Unity, these can also be set through the `PullSubMqttClient` Inspector.
 
@@ -780,7 +660,7 @@ PullSubState State { get; }
 bool IsReady { get; }
 ```
 
-### Subscription Group API (Recommended for Data API)
+### Subscription Group API
 
 `SubscriptionGroup` groups multiple subscriptions with duplicate prevention and atomic cleanup.
 `SubscriptionGroup` methods internally use Runtime operations, while adding group-scoped duplicate prevention and ownership-based cleanup.
@@ -855,8 +735,41 @@ Task<QueueSubscription> SubscribeQueueAsync<T>(
 
 Task<QueueSubscription> SubscribeQueueAsync<T>(
     ITopic<T> topic,
+    Func<T, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueAsync<T>(
+    ITopic<T> topic,
+    Action<T, CancellationToken> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueAsync<T>(
+    ITopic<T> topic,
+    Action<T> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueAsync<T>(
+    ITopic<T> topic,
     QueueOptions options,
     Func<T, CancellationToken, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueAsync<T>(
+    ITopic<T> topic,
+    QueueOptions options,
+    Func<T, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueAsync<T>(
+    ITopic<T> topic,
+    QueueOptions options,
+    Action<T, CancellationToken> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueAsync<T>(
+    ITopic<T> topic,
+    QueueOptions options,
+    Action<T> handler,
     CancellationToken ct = default)
 
 // Stop a specific Queue handler (stops only the Queue, Data subscriptions unaffected)
@@ -886,8 +799,41 @@ Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
 
 Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
     ITopic<T> topic,
+    Func<T, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
+    ITopic<T> topic,
+    Action<T, CancellationToken> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
+    ITopic<T> topic,
+    Action<T> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
+    ITopic<T> topic,
     QueueOptions options,
     Func<T, CancellationToken, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
+    ITopic<T> topic,
+    QueueOptions options,
+    Func<T, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
+    ITopic<T> topic,
+    QueueOptions options,
+    Action<T, CancellationToken> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueOnMainThreadAsync<T>(
+    ITopic<T> topic,
+    QueueOptions options,
+    Action<T> handler,
     CancellationToken ct = default)
 ```
 
@@ -897,10 +843,9 @@ For direct Runtime access without group grouping. Subscription Group API is reco
 
 ```csharp
 // Subscribe / Unsubscribe
-Task SubscribeDataAsync<T>(ITopic<T> topic,
-    CancellationToken ct = default)
-Task SubscribeDataAsync<T>(ITopic<T> topic,
-    PullSubQualityOfServiceLevel subscribeQos,
+Task<DataSubscription<T>> SubscribeDataAsync<T>(
+    ITopic<T> topic,
+    PullSubQualityOfServiceLevel subscribeQos = PullSubQualityOfServiceLevel.AtLeastOnce,
     CancellationToken ct = default)
 Task UnsubscribeDataAsync<T>(ITopic<T> topic,
     CancellationToken ct = default)
@@ -915,7 +860,7 @@ Task<T> WaitForFirstDataAsync<T>(ITopic<T> topic,
 
 ### Queue API (SubscriptionGroup-Integrated and Direct Runtime Access)
 
-Queue API can be used through `SubscriptionGroup` (recommended for lifecycle management) or directly on Runtime (low-level).
+Queue API can be used through `SubscriptionGroup` (recommended for multiple subscriptions lifecycle management) or directly on Runtime.
 
 Low-level polling surface is intentionally minimal: use `ReceiveQueueAsync` for direct queue reads.
 
@@ -946,20 +891,56 @@ Task UnsubscribeQueueAsync(string topic, CancellationToken ct = default)
 // Receive messages
 Task<QueueMessage> ReceiveQueueAsync(string topic,
     CancellationToken ct = default)
+Task<T> ReceiveQueueAsync<T>(ITopic<T> topic,
+    CancellationToken ct = default)
 
 // Register a handler loop (Runtime-level, not group-tracked)
 Task<QueueSubscription> SubscribeQueueAsync<T>(
     ITopic<T> topic,
     Func<T, CancellationToken, ValueTask> handler,
     CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueAsync<T>(
+    ITopic<T> topic,
+    Func<T, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueAsync<T>(
+    ITopic<T> topic,
+    Action<T, CancellationToken> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueAsync<T>(
+    ITopic<T> topic,
+    Action<T> handler,
+    CancellationToken ct = default)
+
 Task<QueueSubscription> SubscribeQueueAsync<T>(
     ITopic<T> topic,
     QueueOptions options,
     Func<T, CancellationToken, ValueTask> handler,
     CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueAsync<T>(
+    ITopic<T> topic,
+    QueueOptions options,
+    Func<T, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueAsync<T>(
+    ITopic<T> topic,
+    QueueOptions options,
+    Action<T, CancellationToken> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> SubscribeQueueAsync<T>(
+    ITopic<T> topic,
+    QueueOptions options,
+    Action<T> handler,
+    CancellationToken ct = default)
 ```
 
-### Request-Reply API
+### Request-Reply API (experimental)
 
 ```csharp
 // Define typed request/response topic
@@ -1011,14 +992,26 @@ Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
 Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
     this PullSubRuntime runtime,
     IRequestTopic<TRequest, TResponse> topic,
-    QueueOptions options,
-    Func<TRequest, CancellationToken, ValueTask<TResponse>> handler,
+    Func<TRequest, RequestContext, CancellationToken, ValueTask<TResponse>> handler,
     CancellationToken ct = default)
 
 Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
     this PullSubRuntime runtime,
     IRequestTopic<TRequest, TResponse> topic,
     Func<TRequest, ReplySender<TResponse>, CancellationToken, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
+    this PullSubRuntime runtime,
+    IRequestTopic<TRequest, TResponse> topic,
+    Func<TRequest, RequestContext, ReplySender<TResponse>, CancellationToken, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
+    this PullSubRuntime runtime,
+    IRequestTopic<TRequest, TResponse> topic,
+    QueueOptions options,
+    Func<TRequest, CancellationToken, ValueTask<TResponse>> handler,
     CancellationToken ct = default)
 
 Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
@@ -1052,14 +1045,26 @@ Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
 Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
     this SubscriptionGroup group,
     IRequestTopic<TRequest, TResponse> topic,
-    QueueOptions options,
-    Func<TRequest, CancellationToken, ValueTask<TResponse>> handler,
+    Func<TRequest, RequestContext, CancellationToken, ValueTask<TResponse>> handler,
     CancellationToken ct = default)
 
 Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
     this SubscriptionGroup group,
     IRequestTopic<TRequest, TResponse> topic,
     Func<TRequest, ReplySender<TResponse>, CancellationToken, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
+    this SubscriptionGroup group,
+    IRequestTopic<TRequest, TResponse> topic,
+    Func<TRequest, RequestContext, ReplySender<TResponse>, CancellationToken, ValueTask> handler,
+    CancellationToken ct = default)
+
+Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
+    this SubscriptionGroup group,
+    IRequestTopic<TRequest, TResponse> topic,
+    QueueOptions options,
+    Func<TRequest, CancellationToken, ValueTask<TResponse>> handler,
     CancellationToken ct = default)
 
 Task<QueueSubscription> RespondAsync<TRequest, TResponse>(
