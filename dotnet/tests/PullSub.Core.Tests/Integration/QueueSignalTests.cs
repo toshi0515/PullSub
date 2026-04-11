@@ -18,17 +18,17 @@ namespace PullSub.Core.Tests.Integration
             const string topic = "test/queue/signal-order";
 
             await runtime.StartAsync();
-            await runtime.SubscribeQueueAsync(topic, new QueueOptions(8));
+            var subscriberId = await runtime.SubscribeQueueAsync(topic, new QueueOptions(8));
 
             using var receiveCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            var firstWait = runtime.ReceiveQueueAsync(topic, receiveCts.Token);
+            var firstWait = runtime.ReceiveQueueAsync(topic, subscriberId, receiveCts.Token);
             await Task.Delay(20);
 
             await transport.EmitMessageAsync(topic, BuildPayload(1));
             await transport.EmitMessageAsync(topic, BuildPayload(2));
 
             var first = await firstWait;
-            var second = await runtime.ReceiveQueueAsync(topic, receiveCts.Token);
+            var second = await runtime.ReceiveQueueAsync(topic, subscriberId, receiveCts.Token);
 
             Assert.Equal(1, ReadSequence(first.Payload));
             Assert.Equal(2, ReadSequence(second.Payload));
@@ -42,11 +42,11 @@ namespace PullSub.Core.Tests.Integration
             const string topic = "test/queue/signal-cancel";
 
             await runtime.StartAsync();
-            await runtime.SubscribeQueueAsync(topic, new QueueOptions(8));
+            var subscriberId = await runtime.SubscribeQueueAsync(topic, new QueueOptions(8));
 
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
             await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-                await runtime.ReceiveQueueAsync(topic, cts.Token));
+                await runtime.ReceiveQueueAsync(topic, subscriberId, cts.Token));
         }
 
         private static byte[] BuildPayload(int sequence)

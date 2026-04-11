@@ -90,13 +90,13 @@ namespace PullSub.Core.Tests.Integration
 
             await runtime.StartAsync();
             await runtime.WaitUntilConnectedAsync();
-            await runtime.SubscribeQueueAsync(topic, QueueOptions.Default);
+            var subscriberId = await runtime.SubscribeQueueAsync(topic, QueueOptions.Default);
 
             await transport.EmitMessageAsync(topic, new byte[32]);
 
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(80));
             await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                () => runtime.ReceiveQueueAsync(topic, cts.Token));
+                () => runtime.ReceiveQueueAsync(topic, subscriberId, cts.Token));
 
             var snapshot = runtime.GetDiagnostics().GetSnapshot();
             Assert.True(snapshot.InboundOversizeDropCount >= 1);

@@ -12,15 +12,14 @@ namespace PullSub.Core.Tests.Integration
     public sealed class RuntimeDataOnlyTests
     {
         [Fact]
-        public async Task SubscribeDataAsync_ClassCodecWithoutInPlace_Throws()
+        public async Task SubscribeDataAsync_ClassCodecWithoutInPlace_DoesNotThrow()
         {
             var transport = new TestTransport();
             await using var runtime = new PullSubRuntime(transport);
 
             await runtime.StartAsync();
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                runtime.SubscribeDataAsync("test/data/no-inplace", new SampleClassCodecWithoutInPlace()));
+            await runtime.SubscribeDataAsync("test/data/no-inplace", new SampleClassCodecWithoutInPlace());
         }
 
         [Fact]
@@ -48,9 +47,17 @@ namespace PullSub.Core.Tests.Integration
             await transport.EmitMessageAsync(topic, secondPayload);
 
             var secondRef = handle.Value;
-            Assert.True(object.ReferenceEquals(firstRef, secondRef));
+            Assert.False(object.ReferenceEquals(firstRef, secondRef));
             Assert.Equal(99, secondRef.Value);
             Assert.Equal(2, secondRef.Counter);
+
+            var thirdPayload = Encode(codec, new SampleClassPayload { Value = 100, Counter = 3 });
+            await transport.EmitMessageAsync(topic, thirdPayload);
+
+            var thirdRef = handle.Value;
+            Assert.False(object.ReferenceEquals(firstRef, thirdRef));
+            Assert.Equal(100, thirdRef.Value);
+            Assert.Equal(3, thirdRef.Counter);
         }
 
         [Fact]
@@ -99,11 +106,19 @@ namespace PullSub.Core.Tests.Integration
             const string topic = "test/queue/decode-failure";
 
             await runtime.StartAsync();
-            await runtime.SubscribeQueueAsync(topic, QueueOptions.Default);
+
+            var tcs = new TaskCompletionSource<bool>();
+            var subTask = runtime.SubscribeQueueAsync(
+                topic,
+                QueueOptions.Default,
+                new SampleClassCodec(),
+                (SampleClassPayload p) => tcs.TrySetResult(true));
+
+            var sub = await subTask;
+
             await transport.EmitMessageAsync(topic, new byte[] { 1, 2, 3 });
 
-            var ex = await Assert.ThrowsAsync<PullSubPayloadDecodeException>(() =>
-                runtime.ReceiveQueueAsync(topic, new SampleClassCodec()));
+            var ex = await Assert.ThrowsAsync<PullSubPayloadDecodeException>(async () => await sub.Completion);
 
             Assert.Equal(topic, ex.Topic);
             Assert.Equal("payload too small", ex.DecodeError);

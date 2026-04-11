@@ -10,6 +10,11 @@ namespace PullSub.Core
             return _rawInbox.TryDequeue(topic, subscriberId, out message);
         }
 
+        internal bool TryGetTotalDroppedCount(string topic, out long droppedCount)
+        {
+            return _rawInbox.TryGetTotalDroppedCount(topic, out droppedCount);
+        }
+
         internal bool TryGetDroppedCount(string topic, System.Guid subscriberId, out long droppedCount)
         {
             return _rawInbox.TryGetDroppedCount(topic, subscriberId, out droppedCount);

@@ -18,17 +18,17 @@ namespace PullSub.Core.Tests.Integration
             const string topic = "test/queue/order";
 
             await runtime.StartAsync();
-            await runtime.SubscribeQueueAsync(topic, new QueueOptions(1));
+            var subscriberId = await runtime.SubscribeQueueAsync(topic, new QueueOptions(1));
 
             await transport.EmitMessageAsync(topic, BuildPayload(1));
             await transport.EmitMessageAsync(topic, BuildPayload(2));
 
             using var receiveCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            var msg = await runtime.ReceiveQueueAsync(topic, receiveCts.Token);
+            var msg = await runtime.ReceiveQueueAsync(topic, subscriberId, receiveCts.Token);
             var sequence = BinaryPrimitives.ReadInt32LittleEndian(msg.Payload.AsSpan(0, 4));
 
             Assert.Equal(2, sequence);
-            Assert.True(runtime.TryGetDroppedCount(topic, out var dropped));
+            Assert.True(runtime.TryGetDroppedCount(topic, subscriberId, out var dropped));
             Assert.Equal(1, dropped);
         }
 

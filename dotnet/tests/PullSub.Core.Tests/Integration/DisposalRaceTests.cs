@@ -19,10 +19,10 @@ namespace PullSub.Core.Tests.Integration
             try
             {
                 await runtime.StartAsync();
-                await runtime.SubscribeQueueAsync(topic, new QueueOptions(8));
+                var subscriberId = await runtime.SubscribeQueueAsync(topic, new QueueOptions(8));
 
                 using var waitCts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(2));
-                var waiting = runtime.ReceiveQueueAsync(topic, waitCts.Token);
+                var waiting = runtime.ReceiveQueueAsync(topic, subscriberId, waitCts.Token);
                 await Task.Delay(20);
 
                 var disposeTask = runtime.DisposeAsync().AsTask();

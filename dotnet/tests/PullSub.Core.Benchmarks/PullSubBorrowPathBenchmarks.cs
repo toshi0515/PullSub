@@ -18,6 +18,7 @@ namespace PullSub.Core.Benchmarks
 
         private global::PullSub.Core.PullSubRuntime? _runtime;
         private byte[] _encoded = Array.Empty<byte>();
+        private Guid _subscriberId;
 
         [GlobalSetup]
         public void Setup()
@@ -26,7 +27,7 @@ namespace PullSub.Core.Benchmarks
             _runtime.StartAsync().GetAwaiter().GetResult();
             _runtime.SubscribeDataAsync(DataTopic, _codec).GetAwaiter().GetResult();
             _runtime.SubscribeDataAsync(MixedTopic, _codec).GetAwaiter().GetResult();
-            _runtime.SubscribeQueueAsync(MixedTopic, new global::PullSub.Core.QueueOptions(1024)).GetAwaiter().GetResult();
+            _subscriberId = _runtime.SubscribeQueueAsync(MixedTopic, new global::PullSub.Core.QueueOptions(1024)).GetAwaiter().GetResult();
 
             var payload = new Phase0PerfDataPayload
             {
@@ -61,8 +62,8 @@ namespace PullSub.Core.Benchmarks
         public int DispatchMixed_CopyOnQueuePath()
         {
             _transport.EmitMessage(MixedTopic, _encoded);
-            _runtime!.TryDequeue(MixedTopic, out var message);
-            return message?.Payload?.Length ?? 0;
+            _runtime!.TryDequeue(MixedTopic, _subscriberId, out var message);
+            return message.Payload?.Length ?? 0;
         }
 
         private static byte[] Encode<T>(global::PullSub.Core.IPayloadCodec<T> codec, T value)

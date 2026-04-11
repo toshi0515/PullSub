@@ -20,7 +20,7 @@ namespace PullSub.Core.Tests.Integration
 
             await runtime.StartAsync();
             await runtime.SubscribeDataAsync(topic, codec);
-            await runtime.SubscribeQueueAsync(topic, new QueueOptions(8));
+            var subscriberId = await runtime.SubscribeQueueAsync(topic, new QueueOptions(8));
 
             var sourcePayload = Encode(codec, new SampleClassPayload { Value = 123, Counter = 7 });
             await transport.EmitMessageAsync(topic, sourcePayload);
@@ -34,7 +34,7 @@ namespace PullSub.Core.Tests.Integration
             Array.Clear(sourcePayload, 0, sourcePayload.Length);
 
             using var receiveCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            var queueMessage = await runtime.ReceiveQueueAsync(topic, receiveCts.Token);
+            var queueMessage = await runtime.ReceiveQueueAsync(topic, subscriberId, receiveCts.Token);
             var ok = codec.TryDecode(queueMessage.Payload, out var queued, out _, out _);
 
             Assert.True(ok);

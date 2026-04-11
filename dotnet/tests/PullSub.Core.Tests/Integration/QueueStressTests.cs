@@ -19,7 +19,7 @@ namespace PullSub.Core.Tests.Integration
             const int total = 1000;
 
             await runtime.StartAsync();
-            await runtime.SubscribeQueueAsync(topic, new QueueOptions(total + 16));
+            var subscriberId = await runtime.SubscribeQueueAsync(topic, new QueueOptions(total + 16));
 
             var publishTask = Task.Run(async () =>
             {
@@ -33,7 +33,7 @@ namespace PullSub.Core.Tests.Integration
 
             while (received < total)
             {
-                var message = await runtime.ReceiveQueueAsync(topic, cts.Token);
+                var message = await runtime.ReceiveQueueAsync(topic, subscriberId, cts.Token);
                 var sequence = BinaryPrimitives.ReadInt32LittleEndian(message.Payload.AsSpan(0, 4));
                 Assert.True(sequence > lastSequence, $"sequence must increase. seq={sequence}, last={lastSequence}");
                 lastSequence = sequence;
@@ -43,7 +43,7 @@ namespace PullSub.Core.Tests.Integration
             await publishTask;
 
             Assert.Equal(total, received);
-            Assert.True(runtime.TryGetDroppedCount(topic, out var dropped));
+            Assert.True(runtime.TryGetDroppedCount(topic, subscriberId, out var dropped));
             Assert.Equal(0, dropped);
         }
 
