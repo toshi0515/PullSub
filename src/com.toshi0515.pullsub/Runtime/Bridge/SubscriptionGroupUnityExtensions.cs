@@ -1,10 +1,14 @@
 using System;
 using System.Threading;
+using Cysharp.Threading.Tasks;
 using PullSub.Core;
 using UnityEngine;
 
 namespace PullSub.Bridge
 {
+    /// <summary>
+    /// Unity lifecycle integration extensions for PullSub subscriptions.
+    /// </summary>
     public static class SubscriptionGroupUnityExtensions
     {
         public static SubscriptionGroup AddTo(
@@ -17,7 +21,10 @@ namespace PullSub.Bridge
             if (behaviour == null)
                 throw new ArgumentNullException(nameof(behaviour));
 
-            behaviour.destroyCancellationToken.Register(group.Dispose);
+            behaviour.destroyCancellationToken.Register(
+                static state => DisposeAndForget((SubscriptionGroup)state).Forget(),
+                group);
+
 #if UNITY_EDITOR
             group.SetDebugLabel(behaviour.gameObject != null ? behaviour.gameObject.name : behaviour.name);
             SubscriptionGroupOwnerDebugRegistry.Register(group, behaviour);
@@ -33,7 +40,10 @@ namespace PullSub.Bridge
             if (group == null)
                 throw new ArgumentNullException(nameof(group));
 
-            cancellationToken.Register(group.Dispose);
+            cancellationToken.Register(
+                static state => DisposeAndForget((SubscriptionGroup)state).Forget(),
+                group);
+
             return group;
         }
 
@@ -47,6 +57,7 @@ namespace PullSub.Bridge
             if (behaviour == null)
                 throw new ArgumentNullException(nameof(behaviour));
 
+            // DataSubscription cleanup is synchronous (no async work needed).
             behaviour.destroyCancellationToken.Register(subscription.Dispose);
             return subscription;
         }
@@ -72,7 +83,10 @@ namespace PullSub.Bridge
             if (behaviour == null)
                 throw new ArgumentNullException(nameof(behaviour));
 
-            behaviour.destroyCancellationToken.Register(registration.Dispose);
+            behaviour.destroyCancellationToken.Register(
+                static state => DisposeAndForget((QueueSubscription)state).Forget(),
+                registration);
+
             return registration;
         }
 
@@ -83,8 +97,26 @@ namespace PullSub.Bridge
             if (registration == null)
                 throw new ArgumentNullException(nameof(registration));
 
-            cancellationToken.Register(registration.Dispose);
+            cancellationToken.Register(
+                static state => DisposeAndForget((QueueSubscription)state).Forget(),
+                registration);
+
             return registration;
         }
+
+        private static async UniTaskVoid DisposeAndForget(SubscriptionGroup s)
+        {
+            try { await s.DisposeAsync(); }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        }
+
+        private static async UniTaskVoid DisposeAndForget(QueueSubscription s)
+        {
+            try { await s.DisposeAsync(); }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        }
+
     }
 }

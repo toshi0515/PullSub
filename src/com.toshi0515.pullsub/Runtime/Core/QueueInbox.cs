@@ -21,19 +21,25 @@ namespace PullSub.Core
 
     internal sealed class PullSubQueueInbox
     {
-        // TryDequeue and DequeueAsync can be mixed on the same topic.
-        // Wakeups are not fair between sync and async consumers.
-        private readonly object _gate = new object();
-        private readonly Dictionary<string, Queue<QueueMessage>> _queues
-            = new Dictionary<string, Queue<QueueMessage>>(StringComparer.Ordinal);
-        private readonly Dictionary<string, QueueOptions> _optionsByTopic
-            = new Dictionary<string, QueueOptions>(StringComparer.Ordinal);
-        private readonly Dictionary<string, long> _droppedCounts
-            = new Dictionary<string, long>(StringComparer.Ordinal);
-        private readonly Dictionary<string, SemaphoreSlim> _signals
-            = new Dictionary<string, SemaphoreSlim>(StringComparer.Ordinal);
+        private sealed class SubscriberState
+        {
+            // All fields are accessed only while holding PullSubQueueInbox._gate.
+            public readonly Queue<QueueMessage> Queue = new Queue<QueueMessage>();
+            public readonly QueueOptions Options;
+            public long DroppedCount;
+            public readonly SemaphoreSlim Signal = new SemaphoreSlim(0, 1);
 
-        public void ConfigureTopic(string topic, QueueOptions options)
+            public SubscriberState(QueueOptions options)
+            {
+                Options = options ?? throw new ArgumentNullException(nameof(options));
+            }
+        }
+
+        private readonly object _gate = new object();
+        private readonly Dictionary<string, Dictionary<Guid, SubscriberState>> _topics
+            = new Dictionary<string, Dictionary<Guid, SubscriberState>>(StringComparer.Ordinal);
+
+        public Guid RegisterSubscriber(string topic, QueueOptions options)
         {
             if (string.IsNullOrWhiteSpace(topic))
                 throw new ArgumentException("topic is required.", nameof(topic));
@@ -41,21 +47,23 @@ namespace PullSub.Core
             if (options == null)
                 throw new ArgumentNullException(nameof(options));
 
+            var subscriberId = Guid.NewGuid();
+            var state = new SubscriberState(options);
+
             lock (_gate)
             {
-                if (_optionsByTopic.ContainsKey(topic))
-                    throw new InvalidOperationException($"Topic '{topic}' is already configured.");
-
-                _optionsByTopic[topic] = options;
-
-                if (!_queues.ContainsKey(topic))
-                    _queues[topic] = new Queue<QueueMessage>();
-
-                GetOrCreateSignalNoLock(topic);
+                if (!_topics.TryGetValue(topic, out var subscribers))
+                {
+                    subscribers = new Dictionary<Guid, SubscriberState>();
+                    _topics[topic] = subscribers;
+                }
+                subscribers[subscriberId] = state;
             }
+
+            return subscriberId;
         }
 
-        public void RemoveTopic(string topic)
+        public void UnregisterSubscriber(string topic, Guid subscriberId)
         {
             if (string.IsNullOrWhiteSpace(topic))
                 return;
@@ -63,12 +71,17 @@ namespace PullSub.Core
             SemaphoreSlim signal = null;
             lock (_gate)
             {
-                _queues.Remove(topic);
-                _optionsByTopic.Remove(topic);
-                _droppedCounts.Remove(topic);
+                if (!_topics.TryGetValue(topic, out var subscribers))
+                    return;
 
-                if (_signals.TryGetValue(topic, out signal))
-                    _signals.Remove(topic);
+                if (!subscribers.TryGetValue(subscriberId, out var state))
+                    return;
+
+                signal = state.Signal;
+                subscribers.Remove(subscriberId);
+
+                if (subscribers.Count == 0)
+                    _topics.Remove(topic);
             }
 
             signal?.Dispose();
@@ -82,44 +95,51 @@ namespace PullSub.Core
             if (payload == null)
                 throw new ArgumentNullException(nameof(payload));
 
-            SemaphoreSlim signal;
-            var shouldSignal = false;
+            var message = new QueueMessage(topic, payload, DateTime.UtcNow);
+            List<SemaphoreSlim> signalsToRelease = null;
+
             lock (_gate)
             {
-                if (!_optionsByTopic.TryGetValue(topic, out var options))
+                if (!_topics.TryGetValue(topic, out var subscribers))
                     return;
 
-                if (!_queues.TryGetValue(topic, out var queue))
+                foreach (var pair in subscribers)
                 {
-                    queue = new Queue<QueueMessage>();
-                    _queues[topic] = queue;
-                }
+                    var state = pair.Value;
 
-                if (queue.Count >= options.MaxQueueDepth)
-                {
-                    queue.Dequeue();
-                    IncrementDroppedCountNoLock(topic);
-                }
+                    if (state.Queue.Count >= state.Options.MaxQueueDepth)
+                    {
+                        state.Queue.Dequeue();
+                        state.DroppedCount++;
+                    }
 
-                queue.Enqueue(new QueueMessage(topic, payload, DateTime.UtcNow));
-                signal = GetOrCreateSignalNoLock(topic);
-                shouldSignal = signal.CurrentCount == 0;
+                    state.Queue.Enqueue(message);
+
+                    if (state.Signal.CurrentCount == 0)
+                    {
+                        if (signalsToRelease == null)
+                            signalsToRelease = new List<SemaphoreSlim>();
+                        signalsToRelease.Add(state.Signal);
+                    }
+                }
             }
 
-            if (!shouldSignal)
+            if (signalsToRelease == null)
                 return;
 
-            try
+            foreach (var signal in signalsToRelease)
             {
-                signal.Release();
-            }
-            catch (ObjectDisposedException)
-            {
-                // Topic can be removed concurrently during shutdown/unsubscribe.
+                try
+                {
+                    signal.Release();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
             }
         }
 
-        public bool TryDequeue(string topic, out QueueMessage message)
+        public bool TryDequeue(string topic, Guid subscriberId, out QueueMessage message)
         {
             message = null;
             if (string.IsNullOrWhiteSpace(topic))
@@ -127,31 +147,18 @@ namespace PullSub.Core
 
             lock (_gate)
             {
-                if (!_queues.TryGetValue(topic, out var queue) || queue.Count == 0)
+                if (!_topics.TryGetValue(topic, out var subscribers))
                     return false;
 
-                message = queue.Dequeue();
+                if (!subscribers.TryGetValue(subscriberId, out var state) || state.Queue.Count == 0)
+                    return false;
+
+                message = state.Queue.Dequeue();
                 return true;
             }
         }
 
-        public bool TryGetDroppedCount(string topic, out long droppedCount)
-        {
-            droppedCount = 0;
-            if (string.IsNullOrWhiteSpace(topic))
-                return false;
-
-            lock (_gate)
-            {
-                if (!_optionsByTopic.ContainsKey(topic))
-                    return false;
-
-                _droppedCounts.TryGetValue(topic, out droppedCount);
-                return true;
-            }
-        }
-
-        public async Task<QueueMessage> DequeueAsync(string topic, CancellationToken cancellationToken = default)
+        public async Task<QueueMessage> DequeueAsync(string topic, Guid subscriberId, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(topic))
                 throw new ArgumentException("topic is required.", nameof(topic));
@@ -161,10 +168,19 @@ namespace PullSub.Core
                 SemaphoreSlim signal;
                 lock (_gate)
                 {
-                    if (_queues.TryGetValue(topic, out var queue) && queue.Count > 0)
-                        return queue.Dequeue();
+                    if (_topics.TryGetValue(topic, out var subscribers) &&
+                        subscribers.TryGetValue(subscriberId, out var state))
+                    {
+                        if (state.Queue.Count > 0)
+                            return state.Queue.Dequeue();
 
-                    signal = GetOrCreateSignalNoLock(topic);
+                        signal = state.Signal;
+                    }
+                    else
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        throw new OperationCanceledException("Subscriber was unregistered while waiting for a message.", cancellationToken);
+                    }
                 }
 
                 try
@@ -179,42 +195,61 @@ namespace PullSub.Core
             }
         }
 
-        public void Clear()
+        public bool TryGetDroppedCount(string topic, Guid subscriberId, out long droppedCount)
         {
-            List<SemaphoreSlim> signals;
+            droppedCount = 0;
+            if (string.IsNullOrWhiteSpace(topic))
+                return false;
+
             lock (_gate)
             {
-                _queues.Clear();
-                _optionsByTopic.Clear();
-                _droppedCounts.Clear();
-                signals = new List<SemaphoreSlim>(_signals.Values);
-                _signals.Clear();
+                if (!_topics.TryGetValue(topic, out var subscribers))
+                    return false;
+
+                if (!subscribers.TryGetValue(subscriberId, out var state))
+                    return false;
+
+                droppedCount = state.DroppedCount;
+                return true;
+            }
+        }
+
+        public bool TryGetTotalDroppedCount(string topic, out long totalDroppedCount)
+        {
+            totalDroppedCount = 0;
+            if (string.IsNullOrWhiteSpace(topic))
+                return false;
+
+            lock (_gate)
+            {
+                if (!_topics.TryGetValue(topic, out var subscribers))
+                    return false;
+
+                foreach (var state in subscribers.Values)
+                {
+                    totalDroppedCount += state.DroppedCount;
+                }
+                return true;
+            }
+        }
+
+        public void Clear()
+        {
+            List<SemaphoreSlim> signals = new List<SemaphoreSlim>();
+            lock (_gate)
+            {
+                foreach (var subscribers in _topics.Values)
+                {
+                    foreach (var state in subscribers.Values)
+                    {
+                        signals.Add(state.Signal);
+                    }
+                }
+                _topics.Clear();
             }
 
             foreach (var signal in signals)
                 signal.Dispose();
-        }
-
-        private void IncrementDroppedCountNoLock(string topic)
-        {
-            if (_droppedCounts.TryGetValue(topic, out var current))
-            {
-                _droppedCounts[topic] = current + 1;
-                return;
-            }
-
-            _droppedCounts[topic] = 1;
-        }
-
-        private SemaphoreSlim GetOrCreateSignalNoLock(string topic)
-        {
-            if (!_signals.TryGetValue(topic, out var signal))
-            {
-                signal = new SemaphoreSlim(0, 1);
-                _signals[topic] = signal;
-            }
-
-            return signal;
         }
     }
 }

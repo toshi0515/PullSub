@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers;
 using System.Threading;
 using System.Threading.Tasks;
@@ -63,7 +63,7 @@ namespace PullSub.Core
             return PublishRawAsync(topic, bytes, qos, retain, cancellationToken);
         }
 
-        public async Task SubscribeQueueAsync(
+        internal async Task<Guid> SubscribeQueueAsync(
             string topic,
             QueueOptions options,
             PullSubQualityOfServiceLevel subscribeQos = PullSubQualityOfServiceLevel.AtLeastOnce,
@@ -86,20 +86,13 @@ namespace PullSub.Core
                 throw;
             }
 
-            if (_subscriptions.IsQueueSubRegistered(topic))
-            {
-                _subscriptionGate.Release();
-                linkedCts?.Dispose();
-                throw new InvalidOperationException(
-                    $"Topic '{topic}' is already subscribed as Queue. Call UnsubscribeQueueAsync first.");
-            }
-
             var shouldNetworkSubscribe = _subscriptions.RegisterQueueSub(topic, subscribeQos);
             try
             {
+                Guid subscriberId;
                 try
                 {
-                    _rawInbox.ConfigureTopic(topic, options);
+                    subscriberId = _rawInbox.RegisterSubscriber(topic, options);
                 }
                 catch
                 {
@@ -116,9 +109,7 @@ namespace PullSub.Core
                     catch
                     {
                         _subscriptions.UnregisterQueueSub(topic);
-
-                        if (!_subscriptions.IsQueueSubRegistered(topic))
-                            _rawInbox.RemoveTopic(topic);
+                        _rawInbox.UnregisterSubscriber(topic, subscriberId);
 
                         if (_subscriptions.TryGetSubscribeQos(topic, out var fallbackSubscribeQos))
                             _ = EnsureNetworkSubscriptionConsistencyAsync(topic, fallbackSubscribeQos);
@@ -126,6 +117,8 @@ namespace PullSub.Core
                         throw;
                     }
                 }
+
+                return subscriberId;
             }
             finally
             {
@@ -196,7 +189,10 @@ namespace PullSub.Core
             }
         }
 
-        public async Task UnsubscribeQueueAsync(string topic, CancellationToken cancellationToken = default)
+        internal async Task UnsubscribeSubscriberAsync(
+            string topic,
+            Guid subscriberId,
+            CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             SubscriptionRegistry.ValidateExactMatchTopic(topic);
@@ -212,13 +208,15 @@ namespace PullSub.Core
                 throw;
             }
 
-            var shouldNetworkUnsubscribe = _subscriptions.UnregisterQueueSub(topic);
             try
             {
-                if (!_subscriptions.IsQueueSubRegistered(topic))
-                    _rawInbox.RemoveTopic(topic);
+                _rawInbox.UnregisterSubscriber(topic, subscriberId);
 
-                if (shouldNetworkUnsubscribe && _transport.IsConnected && IsNetworkSubscribedTopic(topic))
+                var shouldNetworkUnsubscribe = _subscriptions.UnregisterQueueSub(topic);
+
+                if (shouldNetworkUnsubscribe
+                    && _transport.IsConnected
+                    && IsNetworkSubscribedTopic(topic))
                 {
                     await UnsubscribeNetworkAsync(topic, operationToken);
                 }
@@ -229,6 +227,7 @@ namespace PullSub.Core
                 linkedCts?.Dispose();
             }
         }
+
 
         public async Task UnsubscribeDataAsync(string topic, CancellationToken cancellationToken = default)
         {

@@ -121,7 +121,7 @@ namespace PullSub.Core
                 }
 
                 var droppedCount = 0L;
-                if (topic.QueueSubCount > 0 && _rawInbox.TryGetDroppedCount(topic.Topic, out var dropped))
+                if (topic.QueueSubCount > 0 && _rawInbox.TryGetTotalDroppedCount(topic.Topic, out var dropped))
                     droppedCount = dropped;
 
                 var queueHandlerState = PullSubQueueHandlerDebugTracker.GetSnapshot(this, topic.Topic);

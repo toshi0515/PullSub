@@ -5,17 +5,20 @@ namespace PullSub.Core
 {
     public sealed partial class PullSubRuntime
     {
-        internal bool TryDequeue(string topic, out QueueMessage message)
+        internal bool TryDequeue(string topic, System.Guid subscriberId, out QueueMessage message)
         {
-            return _rawInbox.TryDequeue(topic, out message);
+            return _rawInbox.TryDequeue(topic, subscriberId, out message);
         }
 
-        internal bool TryGetDroppedCount(string topic, out long droppedCount)
+        internal bool TryGetDroppedCount(string topic, System.Guid subscriberId, out long droppedCount)
         {
-            return _rawInbox.TryGetDroppedCount(topic, out droppedCount);
+            return _rawInbox.TryGetDroppedCount(topic, subscriberId, out droppedCount);
         }
 
-        public async Task<QueueMessage> ReceiveQueueAsync(string topic, CancellationToken cancellationToken = default)
+        internal async Task<QueueMessage> ReceiveQueueAsync(
+            string topic,
+            System.Guid subscriberId,
+            CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             SubscriptionRegistry.ValidateExactMatchTopic(topic);
@@ -23,7 +26,7 @@ namespace PullSub.Core
 
             try
             {
-                return await _rawInbox.DequeueAsync(topic, operationToken);
+                return await _rawInbox.DequeueAsync(topic, subscriberId, operationToken);
             }
             finally
             {

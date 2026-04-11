@@ -19,6 +19,7 @@ namespace PullSub.Core
 
         internal QueueSubscription(
             string topic,
+            Guid subscriberId,
             CancellationTokenSource registrationCts,
             CancellationTokenSource registrationLinkedCts,
             Task completion)
@@ -29,12 +30,15 @@ namespace PullSub.Core
             SubscriptionRegistry.ValidateExactMatchTopic(topic);
 
             Topic = topic;
+            SubscriberId = subscriberId;
             _registrationCts = registrationCts ?? throw new ArgumentNullException(nameof(registrationCts));
             _registrationLinkedCts = registrationLinkedCts;
             _completion = completion ?? throw new ArgumentNullException(nameof(completion));
         }
 
         public string Topic { get; }
+
+        internal Guid SubscriberId { get; }
 
         /// <summary>
         /// Completes when the underlying handler loop exits.

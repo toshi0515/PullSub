@@ -103,9 +103,11 @@ namespace PullSub.Core
 
         private readonly PullSubRuntime _runtime;
         private readonly object _gate = new object();
-        private readonly HashSet<SubscriptionKey> _inFlightTopics = new HashSet<SubscriptionKey>();
-        private readonly Dictionary<SubscriptionKey, SubscriptionGroupLease> _activeSubscriptions
+        private readonly HashSet<SubscriptionKey> _inFlightDataTopics = new HashSet<SubscriptionKey>();
+        private readonly Dictionary<SubscriptionKey, SubscriptionGroupLease> _activeDataSubscriptions
             = new Dictionary<SubscriptionKey, SubscriptionGroupLease>();
+        private readonly Dictionary<string, List<SubscriptionGroupLease>> _activeQueueSubscriptions
+            = new Dictionary<string, List<SubscriptionGroupLease>>(StringComparer.Ordinal);
         private string _debugLabel;
 
         private int _disposed;
@@ -129,16 +131,27 @@ namespace PullSub.Core
         {
             lock (_gate)
             {
-                var subscriptions = new ContextSubscriptionDebugSnapshot[_activeSubscriptions.Count];
+                var queueCount = 0;
+                foreach (var list in _activeQueueSubscriptions.Values)
+                    queueCount += list.Count;
+
+                var snapshots = new ContextSubscriptionDebugSnapshot[_activeDataSubscriptions.Count + queueCount];
                 var index = 0;
-                foreach (var pair in _activeSubscriptions)
+
+                foreach (var pair in _activeDataSubscriptions)
                 {
-                    subscriptions[index++] = new ContextSubscriptionDebugSnapshot(
-                        pair.Key.Topic,
-                        pair.Key.Kind == SubscriptionKind.Queue);
+                    snapshots[index++] = new ContextSubscriptionDebugSnapshot(pair.Key.Topic, isQueue: false);
                 }
 
-                return new GroupDebugSnapshot(_debugLabel, subscriptions);
+                foreach (var pair in _activeQueueSubscriptions)
+                {
+                    foreach (var _ in pair.Value)
+                    {
+                        snapshots[index++] = new ContextSubscriptionDebugSnapshot(pair.Key, isQueue: true);
+                    }
+                }
+
+                return new GroupDebugSnapshot(_debugLabel, snapshots);
             }
         }
 
@@ -158,13 +171,13 @@ namespace PullSub.Core
             {
                 ThrowIfDisposed_NoLock();
 
-                if (_inFlightTopics.Contains(key) || _activeSubscriptions.ContainsKey(key))
+                if (_inFlightDataTopics.Contains(key) || _activeDataSubscriptions.ContainsKey(key))
                 {
                     throw new InvalidOperationException(
                         $"Topic '{topicName}' is already subscribed in this context.");
                 }
 
-                _inFlightTopics.Add(key);
+                _inFlightDataTopics.Add(key);
             }
 
             DataSubscription<T> handle;
@@ -178,7 +191,7 @@ namespace PullSub.Core
             {
                 lock (_gate)
                 {
-                    _inFlightTopics.Remove(key);
+                    _inFlightDataTopics.Remove(key);
                 }
 
                 throw;
@@ -187,7 +200,7 @@ namespace PullSub.Core
             var shouldCleanupImmediately = false;
             lock (_gate)
             {
-                _inFlightTopics.Remove(key);
+                _inFlightDataTopics.Remove(key);
 
                 if (IsDisposed_NoLock())
                 {
@@ -195,7 +208,7 @@ namespace PullSub.Core
                 }
                 else
                 {
-                    _activeSubscriptions[key] = CreateLease(handle);
+                    _activeDataSubscriptions[key] = CreateLease(handle);
                 }
             }
 
@@ -334,49 +347,30 @@ namespace PullSub.Core
 
             var topicName = topic.TopicName;
             SubscriptionRegistry.ValidateExactMatchTopic(topicName);
-            var key = new SubscriptionKey(topicName, SubscriptionKind.Queue);
 
             lock (_gate)
             {
                 ThrowIfDisposed_NoLock();
-
-                if (_inFlightTopics.Contains(key) || _activeSubscriptions.ContainsKey(key))
-                {
-                    throw new InvalidOperationException(
-                        $"Topic '{topicName}' is already registered as Queue in this context.");
-                }
-
-                _inFlightTopics.Add(key);
             }
 
-            QueueSubscription registration;
-            try
-            {
-                registration = await _runtime.SubscribeQueueAsync(topic, options, handler, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch
-            {
-                lock (_gate)
-                {
-                    _inFlightTopics.Remove(key);
-                }
-
-                throw;
-            }
+            var registration = await _runtime.SubscribeQueueAsync(topic, options, handler, cancellationToken)
+                .ConfigureAwait(false);
 
             var shouldCleanupImmediately = false;
             lock (_gate)
             {
-                _inFlightTopics.Remove(key);
-
                 if (IsDisposed_NoLock())
                 {
                     shouldCleanupImmediately = true;
                 }
                 else
                 {
-                    _activeSubscriptions[key] = CreateLease(registration);
+                    if (!_activeQueueSubscriptions.TryGetValue(topicName, out var list))
+                    {
+                        list = new List<SubscriptionGroupLease>();
+                        _activeQueueSubscriptions[topicName] = list;
+                    }
+                    list.Add(CreateLease(registration));
                 }
             }
 
@@ -398,10 +392,18 @@ namespace PullSub.Core
 
             SubscriptionRegistry.ValidateExactMatchTopic(topic);
 
-            return await UnsubscribeInternalAsync(
-                    new SubscriptionKey(topic, SubscriptionKind.Data),
-                    cancellationToken)
-                .ConfigureAwait(false);
+            SubscriptionGroupLease lease;
+            var key = new SubscriptionKey(topic, SubscriptionKind.Data);
+
+            lock (_gate)
+            {
+                if (!_activeDataSubscriptions.TryGetValue(key, out lease))
+                    return PullSubUnsubscribeResult.AlreadyCanceled;
+
+                _activeDataSubscriptions.Remove(key);
+            }
+
+            return await lease.UnsubscribeAsync(cancellationToken).ConfigureAwait(false);
         }
 
         public async Task<PullSubUnsubscribeResult> UnsubscribeQueueAsync(
@@ -413,27 +415,26 @@ namespace PullSub.Core
 
             SubscriptionRegistry.ValidateExactMatchTopic(topic);
 
-            return await UnsubscribeInternalAsync(
-                    new SubscriptionKey(topic, SubscriptionKind.Queue),
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        private async Task<PullSubUnsubscribeResult> UnsubscribeInternalAsync(
-            SubscriptionKey key,
-            CancellationToken cancellationToken)
-        {
-            SubscriptionGroupLease subscription;
-
+            List<SubscriptionGroupLease> leases;
             lock (_gate)
             {
-                if (!_activeSubscriptions.TryGetValue(key, out subscription))
+                if (!_activeQueueSubscriptions.TryGetValue(topic, out leases) || leases.Count == 0)
                     return PullSubUnsubscribeResult.AlreadyCanceled;
 
-                _activeSubscriptions.Remove(key);
+                _activeQueueSubscriptions.Remove(topic);
             }
 
-            return await subscription.UnsubscribeAsync(cancellationToken).ConfigureAwait(false);
+            var tasks = new Task<PullSubUnsubscribeResult>[leases.Count];
+            for (var i = 0; i < leases.Count; i++)
+                tasks[i] = leases[i].UnsubscribeAsync(cancellationToken);
+
+            var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            foreach (var r in results)
+                if (r == PullSubUnsubscribeResult.Success)
+                    return PullSubUnsubscribeResult.Success;
+
+            return PullSubUnsubscribeResult.AlreadyCanceled;
         }
 
         public async ValueTask DisposeAsync()
@@ -443,19 +444,28 @@ namespace PullSub.Core
 
             SubscriptionGroupDebugTracker.Unregister(_runtime, this);
 
-            SubscriptionGroupLease[] subscriptions;
+            SubscriptionGroupLease[] dataLeases;
+            SubscriptionGroupLease[] queueLeases;
+
             lock (_gate)
             {
-                subscriptions = _activeSubscriptions.Values.ToArray();
-                _activeSubscriptions.Clear();
-                _inFlightTopics.Clear();
+                dataLeases = _activeDataSubscriptions.Values.ToArray();
+                _activeDataSubscriptions.Clear();
+                _inFlightDataTopics.Clear();
+
+                var allQueueLeases = new List<SubscriptionGroupLease>();
+                foreach (var list in _activeQueueSubscriptions.Values)
+                    allQueueLeases.AddRange(list);
+
+                queueLeases = allQueueLeases.ToArray();
+                _activeQueueSubscriptions.Clear();
             }
 
-            var tasks = new List<Task>(subscriptions.Length);
-            foreach (var subscription in subscriptions)
-            {
-                tasks.Add(subscription.UnsubscribeAsync(CancellationToken.None));
-            }
+            var tasks = new List<Task>(dataLeases.Length + queueLeases.Length);
+            foreach (var lease in dataLeases)
+                tasks.Add(lease.UnsubscribeAsync(CancellationToken.None));
+            foreach (var lease in queueLeases)
+                tasks.Add(lease.UnsubscribeAsync(CancellationToken.None));
 
             await Task.WhenAll(tasks).ConfigureAwait(false);
         }
@@ -467,18 +477,27 @@ namespace PullSub.Core
 
             SubscriptionGroupDebugTracker.Unregister(_runtime, this);
 
-            SubscriptionGroupLease[] subscriptions;
+            SubscriptionGroupLease[] dataLeases;
+            SubscriptionGroupLease[] queueLeases;
+
             lock (_gate)
             {
-                subscriptions = _activeSubscriptions.Values.ToArray();
-                _activeSubscriptions.Clear();
-                _inFlightTopics.Clear();
+                dataLeases = _activeDataSubscriptions.Values.ToArray();
+                _activeDataSubscriptions.Clear();
+                _inFlightDataTopics.Clear();
+
+                var allQueueLeases = new List<SubscriptionGroupLease>();
+                foreach (var list in _activeQueueSubscriptions.Values)
+                    allQueueLeases.AddRange(list);
+
+                queueLeases = allQueueLeases.ToArray();
+                _activeQueueSubscriptions.Clear();
             }
 
-            foreach (var subscription in subscriptions)
-            {
-                subscription.Dispose();
-            }
+            foreach (var lease in dataLeases)
+                lease.Dispose();
+            foreach (var lease in queueLeases)
+                lease.Dispose();
         }
 
         private bool IsDisposed_NoLock()

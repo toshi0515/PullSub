@@ -67,17 +67,7 @@ namespace PullSub.Core
             return value;
         }
 
-        public static async Task<T> ReceiveQueueAsync<T>(
-            this PullSubRuntime runtime,
-            string topic,
-            IPayloadCodec<T> codec,
-            CancellationToken cancellationToken = default)
-        {
-            var message = await runtime.ReceiveQueueAsync(topic, cancellationToken)
-                .ConfigureAwait(false);
 
-            return DecodeOrThrow(topic, message.Payload, codec);
-        }
 
         public static Task<QueueSubscription> SubscribeQueueAsync<T>(
             this PullSubRuntime runtime,
@@ -299,7 +289,7 @@ namespace PullSub.Core
 
             var registrationCts = new CancellationTokenSource();
             var leaseToken = CreateLinkedOperationToken(cancellationToken, registrationCts.Token, out var registrationLinkedCts);
-            var startedSignal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var startedSignal = new TaskCompletionSource<Guid>(TaskCreationOptions.RunContinuationsAsynchronously);
             var loopTask = RunQueueHandlerLoopAsync(runtime, topic, options, subscribeQos, handler, leaseToken, startedSignal);
 
             try
@@ -311,7 +301,10 @@ namespace PullSub.Core
                     throw new InvalidOperationException("Handler loop exited before subscription completed.");
                 }
 
-                await startedSignal.Task;
+                var subscriberId = await startedSignal.Task;
+
+                PullSubQueueHandlerDebugTracker.Register(runtime, topic, loopTask);
+                return new QueueSubscription(topic, subscriberId, registrationCts, registrationLinkedCts, loopTask);
             }
             catch
             {
@@ -331,9 +324,6 @@ namespace PullSub.Core
 
                 throw;
             }
-
-            PullSubQueueHandlerDebugTracker.Register(runtime, topic, loopTask);
-            return new QueueSubscription(topic, registrationCts, registrationLinkedCts, loopTask);
         }
 
         internal static Task<QueueSubscription> SubscribeQueueAsync(
@@ -498,21 +488,24 @@ namespace PullSub.Core
             PullSubQualityOfServiceLevel? subscribeQos,
             Func<QueueMessage, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken,
-            TaskCompletionSource<bool> startedSignal)
+            TaskCompletionSource<Guid> startedSignal)
         {
+            var subscriberId = Guid.Empty;
             try
             {
+                Guid sid;
                 if (subscribeQos.HasValue)
-                    await runtime.SubscribeQueueAsync(topic, options, subscribeQos.Value, cancellationToken);
+                    sid = await runtime.SubscribeQueueAsync(topic, options, subscribeQos.Value, cancellationToken).ConfigureAwait(false);
                 else
-                    await runtime.SubscribeQueueAsync(topic, options, cancellationToken: cancellationToken);
+                    sid = await runtime.SubscribeQueueAsync(topic, options, cancellationToken: cancellationToken).ConfigureAwait(false);
 
-                startedSignal?.TrySetResult(true);
+                subscriberId = sid;
+                startedSignal?.TrySetResult(subscriberId);
 
                 while (true)
                 {
-                    var message = await runtime.ReceiveQueueAsync(topic, cancellationToken);
-                    await handler(message, cancellationToken);
+                    var message = await runtime.ReceiveQueueAsync(topic, subscriberId, cancellationToken).ConfigureAwait(false);
+                    await handler(message, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || runtime.State == PullSubState.Disposed)
@@ -530,16 +523,19 @@ namespace PullSub.Core
             }
             finally
             {
-                try
+                if (subscriberId != Guid.Empty)
                 {
-                    using var bestEffortCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                    await runtime.UnsubscribeQueueAsync(topic, bestEffortCts.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                }
-                catch (ObjectDisposedException)
-                {
+                    try
+                    {
+                        using var bestEffortCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                        await runtime.UnsubscribeSubscriberAsync(topic, subscriberId, bestEffortCts.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                    }
                 }
             }
         }
@@ -650,16 +646,7 @@ namespace PullSub.Core
                 cancellationToken);
         }
 
-        public static Task<T> ReceiveQueueAsync<T>(
-            this PullSubRuntime runtime,
-            ITopic<T> topic,
-            CancellationToken cancellationToken = default)
-        {
-            return runtime.ReceiveQueueAsync<T>(
-                topic.TopicName,
-                topic.Codec,
-                cancellationToken);
-        }
+
 
         public static Task<QueueSubscription> SubscribeQueueAsync<T>(
             this PullSubRuntime runtime,
