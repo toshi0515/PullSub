@@ -15,7 +15,7 @@ Pull-style typed Pub/Sub for Unity and .NET - MQTT built-in, transport-agnostic 
 
 ## What PullSub provides
 
-When visualizing real-time robot positions in Unity from JSON messages over MQTT, managing thread safety and deserialization for every update is repetitive and error-prone. PullSub replaces this manual overhead with a clean, type-safe pull API.
+For example, when visualizing real-time robot positions in Unity from JSON messages over MQTT, managing thread safety and deserialization for every update is repetitive and error-prone. PullSub replaces this manual overhead with a clean, type-safe pull API.
 
 ```csharp
 // Raw MQTTnet — thread safety, decoding, and lifetime management are your responsibility
@@ -115,7 +115,7 @@ var queueSubscription = await runtime.SubscribeQueueAsync(
 
 ### Install UniTask
 
-Install [UniTask](https://github.com/Cysharp/UniTask) as a Unity package.
+PullSub requires [UniTask](https://github.com/Cysharp/UniTask) (2.x) as a Unity package.
 
 ### Install DLLs
 
@@ -140,10 +140,22 @@ https://github.com/toshi0515/PullSub.git?path=src/com.toshi0515.pullsub
 
 ## Getting Started — .NET (NuGet)
 
+**Requirements:** .NET 6.0 or later
+
+Install the core package:
+
 ```
 dotnet add package PullSub.Core
+```
+
+To use the built-in MQTT transport, also install:
+
+```
 dotnet add package PullSub.Mqtt
 ```
+
+**Note:** `PullSub.Core` targets `netstandard2.1` and is compatible with
+.NET 6, 7, 8, and later. `PullSub.Mqtt` depends on MQTTnet 4.3.x, which is automatically installed as a dependency.
 
 ---
 
@@ -859,6 +871,14 @@ When building with IL2CPP, add the types used with `SubscribeDataAsync<T>` and `
 </linker>
 ```
 ---
+
+## Maintenance Status
+
+This library is maintained by a student developer on a best-effort basis.
+Response times may vary. Contributions and bug reports are welcome.
+
+This project was developed as a personal learning project, with assistance
+from LLM-based tools (e.g. GitHub Copilot, Claude) during development.
 
 ## License
 

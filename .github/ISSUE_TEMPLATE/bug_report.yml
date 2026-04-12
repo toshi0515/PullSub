@@ -1,0 +1,11 @@
+name: Bug Report
+about: Report a bug
+body:
+  - type: textarea
+    label: Description
+    description: What happened?
+  - type: textarea
+    label: Steps to reproduce
+  - type: input
+    label: Version
+    placeholder: "0.1.0"

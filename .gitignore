@@ -17,6 +17,9 @@ Thumbs.db
 !src/**/*.csproj
 !tests/**/*.csproj
 !src/**/*.slnx
+!dotnet/**/*.csproj
+!dotnet/**/*.slnx
+
 omnisharp.json
 
 # .NET build output (redirected here from src/ to avoid Unity DLL conflicts)
