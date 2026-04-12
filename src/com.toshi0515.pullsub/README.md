@@ -2,6 +2,7 @@
 ![Unity 2022.3+](https://img.shields.io/badge/Unity-2022.3%2B-black)
 ![.NET Standard 2.1](https://img.shields.io/badge/.NET-Standard%202.1-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Test](https://github.com/toshi0515/PullSub/actions/workflows/test.yml/badge.svg)](https://github.com/toshi0515/PullSub/actions/workflows/test.yml)
 
 Pull-style typed Pub/Sub for Unity and .NET - MQTT built-in, transport-agnostic design
 
@@ -760,13 +761,6 @@ Task<QueueSubscription> group.SubscribeQueueOnMainThreadAsync<T>(...)
 
 // Direct Runtime Access (Runtime-level, manual lifecycle)
 Task<QueueSubscription> runtime.SubscribeQueueAsync<T>(...)
-```
-
-**Low-level Queue Reads (Direct Runtime):**
-```csharp
-// Poll messages manually instead of registering a handler
-Task<QueueMessage> runtime.ReceiveQueueAsync(string topic, CancellationToken ct = default)
-Task<T> runtime.ReceiveQueueAsync<T>(ITopic<T> topic, CancellationToken ct = default)
 ```
 
 **Unsubscribe Queue Handlers:**

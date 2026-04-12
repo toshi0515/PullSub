@@ -1,11 +1,39 @@
 name: Bug Report
-about: Report a bug
+description: Report a bug
+labels: ["bug"]
 body:
-  - type: textarea
-    label: Description
-    description: What happened?
-  - type: textarea
-    label: Steps to reproduce
   - type: input
-    label: Version
-    placeholder: "0.1.0"
+    id: version
+    attributes:
+      label: PullSub Version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "Unity 2022.3 / .NET 8.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
