@@ -1,0 +1,14 @@
+# Default
+* text=auto eol=lf
+
+# Keep Windows line endings
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.gif binary
+*.dll binary
+*.exe binary
+*.unitypackage binary

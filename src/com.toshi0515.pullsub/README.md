@@ -375,7 +375,7 @@ Use the monitor window to inspect all `PullSubMqttClient` instances in open scen
 - **Connection**: Client ID and policy, reconnect attempts, current delay, next retry time, last failure reason
 - **Request/Reply**: Pending request count, timeout/failure counters, reply inbox subscription status
 - **Topics**: Active topic list with subscriber counts (Data/Queue), message receive rate, data latency, QoS level
-- **Contexts**: Associated `PullSubContext` instances and their subscriptions
+- **Groups**: Associated `SubscriptionGroup` instances and their subscriptions
 - **Recently Removed**: Topics unsubscribed in the last 10 seconds
 
 **Warning Color (Orange) Indicates:**

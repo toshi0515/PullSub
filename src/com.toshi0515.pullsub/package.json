@@ -2,14 +2,14 @@
   "name": "com.toshi0515.pullsub",
   "version": "1.0.0",
   "displayName": "PullSub",
-  "description": "Pull-style typed Pub/Sub runtime for Unity and .NET. Supports MQTTnet v4.3.x.",
+  "description": "Pull-style typed Pub/Sub for Unity and .NET - MQTT built-in, transport-agnostic design",
   "unity": "2022.3",
   "dependencies": {
     "com.cysharp.unitask": "2.5.10"
   },
   "author": {
     "name": "toshi0515",
-    "url": "https://github.com/Toshi-0515"
+    "url": "https://github.com/toshi0515"
   },
   "keywords": [
     "mqtt",

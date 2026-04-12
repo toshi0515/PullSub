@@ -13,7 +13,7 @@ Thumbs.db
 *.csproj
 *.sln
 *.slnx
-# ただし、手動で作成した src/ と tests/ 以下のプロジェクトファイルは Git 管理に含める
+
 !src/**/*.csproj
 !tests/**/*.csproj
 !src/**/*.slnx
