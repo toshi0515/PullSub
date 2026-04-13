@@ -18,16 +18,21 @@ Pull-style typed Pub/Sub for Unity and .NET - MQTT built-in, transport-agnostic 
 
 For example, when visualizing real-time robot positions in Unity from JSON messages over MQTT, managing thread safety and deserialization for every update is repetitive and error-prone. PullSub replaces this manual overhead with a clean, type-safe pull API.
 
+### Raw MQTTnet — thread safety, decoding, and lifetime management are your responsibility
+
 ```csharp
-// Raw MQTTnet — thread safety, decoding, and lifetime management are your responsibility
 client.ApplicationMessageReceivedAsync += e =>
 {
     var payload = e.ApplicationMessage.Payload;
     var position = JsonSerializer.Deserialize<Position>(payload);
     lock (_gate) { _position = position; }
 };
+```
 
-// PullSub — define your type and topic once, then just pull
+### PullSub — define your type and topic once, then just pull
+
+```csharp
+// Define your type
 public sealed class Position
 {
     public float X { get; set; }
@@ -35,6 +40,7 @@ public sealed class Position
     public float Z { get; set; }
 }
 
+// Define your topic
 public static class Topics
 {
     public static readonly ITopic<Position> Position
@@ -42,30 +48,89 @@ public static class Topics
 }
 ```
 
-**Unity**
+#### Edge Device (.NET / Raspberry Pi) — Publish sensor data
+```csharp
+// Serialize and publish with one line — no manual JSON needed
+await runtime.PublishDataAsync(Topics.Position, new Position
+{
+    X = sensor.ReadX(),
+    Y = sensor.ReadY(),
+    Z = sensor.ReadZ()
+});
+```
+
+#### Unity — Subscribe and visualize
 ```csharp
 public class RobotController : MonoBehaviour
 {
     [SerializeField] private PullSubMqttClient _client;
 
-    private DataSubscription<Position> _positionSubscription;
+    private DataSubscription<Position> _sub;
 
     private async void Start()
     {
-        _positionSubscription = await _client.Runtime.SubscribeDataAsync(Topics.Position);
-        _positionSubscription?.AddTo(this); // Automatic disposal on OnDestroy
+        _sub = await _client.Runtime.SubscribeDataAsync(Topics.Position);
+        _sub?.AddTo(this); // Automatic disposal on OnDestroy
     }
 
     private void Update()
     {
         // Access the latest value
-        if (_positionSubscription?.TryGet(out var pos) == true)
+        if (_sub?.TryGet(out var pos) == true)
         {
             transform.position = new Vector3(pos.X, pos.Y, pos.Z);
         }
     }
 }
 ```
+
+### Payload Format
+
+PullSub automatically handles JSON serialization and deserialization.
+You define your C# type and topic once — encoding on publish and
+decoding on receive are handled internally.
+
+#### Default (JSON envelope)
+
+```json
+{
+  "timestamp": "2026-04-13T12:00:00.000Z",
+  "data": {
+    "x": 1.0,
+    "y": 2.0,
+    "z": 3.0
+  }
+}
+```
+
+#### Flat JSON
+
+```json
+{
+  "timestamp": "2026-04-13T12:00:00.000Z",
+  "x": 1.0,
+  "y": 2.0,
+  "z": 3.0
+}
+```
+
+The `timestamp` field is written automatically on publish and read
+automatically on receive. It is exposed via `DataSubscription<T>.TimestampUtc`.
+
+Use flat JSON when interoperating with external systems that publish
+in this format (e.g. existing IoT devices or other MQTT clients).
+
+```csharp
+// JSON envelope (default)
+PullSubTopic.Create<Position>("robot/position");
+
+// Flat JSON
+PullSubTopic.CreateFlat<Position>("robot/position");
+```
+
+> **Note:** The `timestamp` property name is reserved in flat JSON format.
+> Do not use it as a property name in your C# type.
+
 
 **Why PullSub?** 
 - Because callback-driven MQTT libraries force you to manage thread safety, decoding, and data lifetime yourself. PullSub handles all of that — just define your type and pull the latest value whenever you need it.
@@ -123,6 +188,7 @@ PullSub requires [UniTask](https://github.com/Cysharp/UniTask) (2.x) as a Unity 
 Installing DLLs via [NuGet for Unity](https://github.com/GlitchEnzo/NuGetForUnity) is recommended, or place them manually in your `Assets/Plugins` folder.
 
 <img width="577" height="452" alt="image" src="https://github.com/user-attachments/assets/59c886cb-8fb5-4117-857b-7de0b316c6b8" />
+
 
 **Core**
 - `System.Text.Json.dll` (8.0.x)
