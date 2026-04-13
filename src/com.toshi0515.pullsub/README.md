@@ -131,6 +131,21 @@ PullSubTopic.CreateFlat<Position>("robot/position");
 > **Note:** The `timestamp` property name is reserved in flat JSON format.
 > Do not use it as a property name in your C# type.
 
+#### Custom Codec
+
+PullSub's payload format is fully replaceable via `IPayloadCodec<T>`.
+Swap System.Text.Json for MessagePack, MemoryPack, or any binary format
+to match your performance requirements or interoperate with existing systems.
+
+```csharp
+// Custom codec (e.g. MemoryPack)
+PullSubTopic.Create<Position>("robot/position",
+    new MemoryPackPayloadCodec<Position>());
+```
+
+The built-in JSON codecs define the envelope structure (`timestamp` + `data`).
+Custom codecs can use any wire format — the structure is entirely up to you.
+
 
 **Why PullSub?** 
 - Because callback-driven MQTT libraries force you to manage thread safety, decoding, and data lifetime yourself. PullSub handles all of that — just define your type and pull the latest value whenever you need it.
