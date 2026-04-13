@@ -122,7 +122,8 @@ PullSub requires [UniTask](https://github.com/Cysharp/UniTask) (2.x) as a Unity 
 
 Installing DLLs via [NuGet for Unity](https://github.com/GlitchEnzo/NuGetForUnity) is recommended, or place them manually in your `Assets/Plugins` folder.
 
-<img width="571" height="556" alt="image" src="https://github.com/user-attachments/assets/7fa6bc3a-574e-46c7-aa81-c3b1129852a1" />
+<img width="577" height="452" alt="image" src="https://github.com/user-attachments/assets/59c886cb-8fb5-4117-857b-7de0b316c6b8" />
+
 
 **Core**
 - `System.Text.Json.dll` (8.0.x)
