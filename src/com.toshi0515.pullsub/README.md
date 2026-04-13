@@ -874,6 +874,14 @@ Response times may vary. Contributions and bug reports are welcome.
 This project was developed as a personal learning project, with assistance
 from LLM-based tools (e.g. GitHub Copilot, Claude) during development.
 
+## Third-Party Licenses
+
+PullSub uses the following third-party libraries:
+
+- [MQTTnet](https://github.com/dotnet/MQTTnet) - MIT License
+- [UniTask](https://github.com/Cysharp/UniTask) - MIT License
+- [System.Text.Json](https://github.com/dotnet/runtime) - MIT License
+
 ## License
 
 [MIT License](LICENSE)
