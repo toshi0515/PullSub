@@ -3,6 +3,8 @@
 ![.NET Standard 2.1](https://img.shields.io/badge/.NET-Standard%202.1-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Test](https://github.com/toshi0515/PullSub/actions/workflows/test.yml/badge.svg)](https://github.com/toshi0515/PullSub/actions/workflows/test.yml)
+[![NuGet PullSub.Core](https://img.shields.io/nuget/v/PullSub.Core?label=PullSub.Core)](https://www.nuget.org/packages/PullSub.Core/)
+[![NuGet PullSub.Mqtt](https://img.shields.io/nuget/v/PullSub.Mqtt?label=PullSub.Mqtt)](https://www.nuget.org/packages/PullSub.Mqtt/)
 
 Pull-style typed Pub/Sub for Unity and .NET - MQTT built-in, transport-agnostic design
 
@@ -11,6 +13,8 @@ Pull-style typed Pub/Sub for Unity and .NET - MQTT built-in, transport-agnostic 
 - Customizable codec and serializer — can customize payload structure to match specific formats such as OPC UA, and can optimize GC by swapping serializers (e.g. MessagePack)
 - Transport-agnostic design — swap MQTT for UDP or any custom protocol by implementing `ITransport` interface
 - Share code between Unity and edge devices such as Raspberry Pi — the Core layer has no Unity dependency
+
+English | [日本語](README_JP.md)
 
 ---
 
@@ -222,15 +226,15 @@ https://github.com/toshi0515/PullSub.git?path=src/com.toshi0515.pullsub
 
 ## Getting Started — .NET (NuGet)
 
-**Requirements:** .NET 6.0 or later
+**Requirements:** .NET Standard 2.1 compatible environment (.NET 6.0+ recommended)
 
-Install the core package:
+Install the core package ([NuGet](https://www.nuget.org/packages/PullSub.Core/)):
 
 ```
 dotnet add package PullSub.Core
 ```
 
-To use the built-in MQTT transport, also install:
+To use the built-in MQTT transport, also install ([NuGet](https://www.nuget.org/packages/PullSub.Mqtt/)):
 
 ```
 dotnet add package PullSub.Mqtt
@@ -655,9 +659,6 @@ PullSubTopic.Create<Position>("robot/position",
 ```
 
 Always share the same codec between Publisher and Subscriber. Defining the codec inside `ITopic<T>` is the recommended way to enforce this.
-
-For class payloads used in Data API, codecs must support in-place decode (`IPayloadInPlaceCodec<T>`).
-Built-in JSON codecs already support this contract.
 
 Request-Reply serialization contract (v1):
 
