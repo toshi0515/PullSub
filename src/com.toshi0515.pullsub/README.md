@@ -6,7 +6,7 @@
 [![NuGet PullSub.Core](https://img.shields.io/nuget/v/PullSub.Core?label=PullSub.Core)](https://www.nuget.org/packages/PullSub.Core/)
 [![NuGet PullSub.Mqtt](https://img.shields.io/nuget/v/PullSub.Mqtt?label=PullSub.Mqtt)](https://www.nuget.org/packages/PullSub.Mqtt/)
 
-Pull-style typed Pub/Sub for Unity and .NET - MQTT built-in, transport-agnostic design
+Pull-style typed Pub/Sub for Unity and .NET — Built on MQTTnet 4.3.x, transport-agnostic design
 
 - For real-time messaging: Get the latest data efficiently — best for digital twin, robotics, smart home, etc.
 - Easy and type-safe access from the Unity main thread while transport/serialization layers run in other threads

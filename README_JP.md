@@ -6,14 +6,13 @@
 [![NuGet PullSub.Core](https://img.shields.io/nuget/v/PullSub.Core?label=PullSub.Core)](https://www.nuget.org/packages/PullSub.Core/)
 [![NuGet PullSub.Mqtt](https://img.shields.io/nuget/v/PullSub.Mqtt?label=PullSub.Mqtt)](https://www.nuget.org/packages/PullSub.Mqtt/)
 
-Unityと.NETのためのPull型・型安全Pub/Subライブラリ — MQTT組み込み、かつトランスポート非依存設計
+Unityと.NET向けのPull型・型安全Pub/Subライブラリ — MQTT(MQTTnet v4.3.x)組み込み、トランスポート非依存設計
 
 - リアルタイムメッセージング向け: 常に最新のデータを効率的に取得 — デジタルツイン、ロボティクス、スマートホームなどに最適
 - トランスポートやシリアライズ処理が別スレッドで実行される一方、Unityメインスレッドから簡単かつ型安全にアクセス可能
 - カスタマイズ可能なコーデックとシリアライザ — ペイロード構造を特定のフォーマット(OPC UAなど)に合わせてカスタマイズでき、シリアライザ(例: MessagePack)を差し替えることでGC最適化が可能
 - トランスポート非依存設計 — `ITransport`インターフェースを実装することで、MQTTをUDPや任意のカスタムプロトコルに置換可能
 - UnityとRaspberry Piなどのエッジデバイス間でコードを共有 — CoreレイヤーはUnityへの依存なし
-
 
 [English](README.md) | 日本語
 
