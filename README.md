@@ -251,12 +251,12 @@ dotnet add package PullSub.Mqtt
 
 Add `PullSubMqttClient` to a GameObject and configure the broker settings in the Inspector.
 
-`PullSubMqttClient` supports host switching for local debugging:
+`PullSubMqttClient` supports switching between two full connection configurations for local debugging:
 
-- `Debug Mode` off: connects to `Default Broker Host`
-- `Debug Mode` on: connects to `Debug Broker Host`
+- `Debug Mode` off: connects using the **Connection** settings
+- `Debug Mode` on: connects using the **Debug Mode** settings
 
-This is useful when using a local broker such as `127.0.0.1` during development while keeping the default destination for integration or production testing.
+This is useful when pointing to a local broker during development while keeping the production broker address and its full settings (port, TLS, credentials, etc.) in the default configuration. Debug Mode is automatically suppressed in non-development builds even if left enabled in the Inspector.
 
 ### 2. Define Topic and Type
 
@@ -726,12 +726,16 @@ var connectionOptions = new MqttConnectionOptions(
 // Use Transport=Wss when TLS is required.
 ```
 
-### Unity Debug Broker Host
+### Unity Debug Mode
 
-In Unity, `PullSubMqttClient` Inspector provides `Debug Mode`, `Default Broker Host`, and `Debug Broker Host`.
+In Unity, `PullSubMqttClient` Inspector provides two complete and independent connection setting groups:
 
-When `Debug Mode` is enabled, the component connects to `Debug Broker Host` instead of `Default Broker Host`.
-Only the host is switched. Port, credentials, TLS, WebSocket, client ID, and other connection options are shared.
+- **Connection** — used in normal operation and in all non-development builds
+- **Debug Mode / Debug Connection Settings** — used when `Debug Mode` is enabled in Editor or Development Build
+
+All connection options are independently configurable for each group, including host, port, credentials, TLS, transport, client ID, keep alive, reconnect, and LWT. Only the active group is used when establishing the connection.
+
+`Debug Mode` is automatically suppressed in non-development builds. If `Debug Mode` is left enabled when making a non-development build, a `LogWarning` is emitted and the default **Connection** settings are used.
 
 ### Last Will and Testament (LWT)
 

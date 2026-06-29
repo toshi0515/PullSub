@@ -440,7 +440,9 @@ namespace PullSub.Editor
 
             var runtime = view.Runtime;
             var connection = GetConnectionSummary(client);
-            var modeLabel = connection.DebugMode ? "Debug" : "Default";
+            var modeLabel = connection.IsDebugActive ? "Debug" :
+                connection.IsDebugSuppressed ? "Default (Debug suppressed)" :
+                "Default";
             var label = $"{clientGameObject.name} ({connection.Host}:{connection.Port}, {modeLabel})";
 
             using (new EditorGUILayout.VerticalScope("box"))
@@ -757,13 +759,14 @@ namespace PullSub.Editor
             int Port,
             string ClientIdPolicy,
             string ClientIdText,
-            bool DebugMode,
+            bool IsDebugActive,
+            bool IsDebugSuppressed,
             string DefaultHost,
             string DebugHost) GetConnectionSummary(
             PullSubMqttClient client)
         {
             if (client == null)
-                return ("unknown", 0, "Unknown", "(auto)", false, "unknown", "unknown");
+                return ("unknown", 0, "Unknown", "(auto)", false, false, "unknown", "unknown");
 
             try
             {
@@ -771,7 +774,7 @@ namespace PullSub.Editor
             }
             catch (MissingReferenceException)
             {
-                return ("unknown", 0, "Unknown", "(auto)", false, "unknown", "unknown");
+                return ("unknown", 0, "Unknown", "(auto)", false, false, "unknown", "unknown");
             }
         }
 

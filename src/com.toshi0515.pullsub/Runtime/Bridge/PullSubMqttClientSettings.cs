@@ -203,10 +203,7 @@ namespace PullSub.Bridge
     public sealed class PullSubClientConnectionSettings
     {
         [Header("Broker")]
-        [SerializeField] private bool _debugMode;
-        [FormerlySerializedAs("_brokerHost")]
-        [SerializeField] private string _defaultBrokerHost = "127.0.0.1";
-        [SerializeField] private string _debugBrokerHost = "127.0.0.1";
+        [SerializeField] private string _brokerHost = "127.0.0.1";
         [SerializeField] private int _brokerPort = 1883;
         [SerializeField] private string _username = "";
         [SerializeField] private string _password = "";
@@ -247,10 +244,7 @@ namespace PullSub.Bridge
         [Header("TLS")]
         [SerializeField] private PullSubClientTlsSettings _tlsSettings = new PullSubClientTlsSettings();
 
-        public bool DebugMode => _debugMode;
-        public string DefaultBrokerHost => _defaultBrokerHost;
-        public string DebugBrokerHost => _debugBrokerHost;
-        public string BrokerHost => _debugMode ? _debugBrokerHost : _defaultBrokerHost;
+        public string BrokerHost => _brokerHost;
         public int BrokerPort => _brokerPort;
         public MqttClientIdPolicy ClientIdPolicy => _clientIdPolicy;
         public string FixedClientId => _fixedClientId;
@@ -341,9 +335,7 @@ namespace PullSub.Bridge
             MqttClientIdPolicy clientIdPolicy,
             string fixedClientId)
         {
-            _debugMode = false;
-            _defaultBrokerHost = string.IsNullOrWhiteSpace(brokerHost) ? "127.0.0.1" : brokerHost;
-            _debugBrokerHost = "127.0.0.1";
+            _brokerHost = string.IsNullOrWhiteSpace(brokerHost) ? "127.0.0.1" : brokerHost;
             _brokerPort = brokerPort > 0 ? brokerPort : 1883;
             _username = username ?? string.Empty;
             _password = password ?? string.Empty;

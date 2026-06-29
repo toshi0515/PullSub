@@ -30,6 +30,10 @@ namespace PullSub.Bridge
         [SerializeField][HideInInspector] private string _legacyFixedClientId = "";
         [SerializeField][HideInInspector] private bool _legacyConnectionMigrated;
 
+        [Header("Debug Mode")]
+        [SerializeField] private bool _debugMode;
+        [SerializeField] private PullSubClientConnectionSettings _debugConnectionSettings = new PullSubClientConnectionSettings();
+
         [Header("Lifecycle")]
         [SerializeField] private bool _startOnEnable = true;
         [SerializeField] private bool _stopOnDisable = false;
@@ -45,32 +49,38 @@ namespace PullSub.Bridge
             int Port,
             string ClientIdPolicy,
             string ClientIdText,
-            bool DebugMode,
+            bool IsDebugActive,
+            bool IsDebugSuppressed,
             string DefaultHost,
             string DebugHost) GetConnectionSummaryForDebugMonitor()
         {
             if (_connectionSettings == null)
-                return ("unknown", 0, "Unknown", "(auto)", false, "unknown", "unknown");
+                return ("unknown", 0, "Unknown", "(auto)", false, false, "unknown", "unknown");
 
-            var host = string.IsNullOrWhiteSpace(_connectionSettings.BrokerHost)
+            var isDebugActive = IsDebugModeActive();
+            var isDebugSuppressed = _debugMode && !isDebugActive;
+            var effective = GetEffectiveConnectionSettings();
+
+            var host = string.IsNullOrWhiteSpace(effective.BrokerHost)
+                ? "unknown"
+                : effective.BrokerHost;
+            var defaultHost = string.IsNullOrWhiteSpace(_connectionSettings.BrokerHost)
                 ? "unknown"
                 : _connectionSettings.BrokerHost;
-            var defaultHost = string.IsNullOrWhiteSpace(_connectionSettings.DefaultBrokerHost)
-                ? "unknown"
-                : _connectionSettings.DefaultBrokerHost;
-            var debugHost = string.IsNullOrWhiteSpace(_connectionSettings.DebugBrokerHost)
-                ? "unknown"
-                : _connectionSettings.DebugBrokerHost;
-            var clientIdText = string.IsNullOrWhiteSpace(_connectionSettings.FixedClientId)
+            var debugHost = _debugConnectionSettings != null && !string.IsNullOrWhiteSpace(_debugConnectionSettings.BrokerHost)
+                ? _debugConnectionSettings.BrokerHost
+                : "unknown";
+            var clientIdText = string.IsNullOrWhiteSpace(effective.FixedClientId)
                 ? "(auto)"
-                : _connectionSettings.FixedClientId;
+                : effective.FixedClientId;
 
             return (
                 host,
-                _connectionSettings.BrokerPort,
-                _connectionSettings.ClientIdPolicy.ToString(),
+                effective.BrokerPort,
+                effective.ClientIdPolicy.ToString(),
                 clientIdText,
-                _connectionSettings.DebugMode,
+                isDebugActive,
+                isDebugSuppressed,
                 defaultHost,
                 debugHost);
         }
@@ -78,6 +88,7 @@ namespace PullSub.Bridge
         private void Awake()
         {
             EnsureConnectionSettings();
+            EnsureDebugConnectionSettings();
             MigrateLegacyConnectionSettingsIfNeeded();
             _connectionSettings.MigrateLegacyKeepAliveIfNeeded();
             EnsureRuntime();
@@ -140,31 +151,25 @@ namespace PullSub.Bridge
             if (_initialized && Runtime != null)
                 return;
 
-            var connectionOptions = _connectionSettings.ToConnectionOptions();
-            WarnIfInsecureTlsOptionsEnabled(connectionOptions);
+            LogDebugModeSelection();
 
-            var brokerHost = _connectionSettings.BrokerHost;
-            var brokerPort = _connectionSettings.BrokerPort;
-            LogBrokerModeSelection(
-                _connectionSettings.DebugMode,
-                _connectionSettings.DefaultBrokerHost,
-                _connectionSettings.DebugBrokerHost,
-                brokerHost,
-                brokerPort);
+            var effective = GetEffectiveConnectionSettings();
+            var connectionOptions = effective.ToConnectionOptions();
+            WarnIfInsecureTlsOptionsEnabled(connectionOptions);
 
             Runtime = new PullSubRuntime(
                 transport: new MqttTransport(
-                    brokerHost: brokerHost,
-                    brokerPort: brokerPort,
+                    brokerHost: effective.BrokerHost,
+                    brokerPort: effective.BrokerPort,
                     connectionOptions: connectionOptions,
-                    clientIdPolicy: _connectionSettings.ClientIdPolicy,
-                    fixedClientId: _connectionSettings.FixedClientId),
+                    clientIdPolicy: effective.ClientIdPolicy,
+                    fixedClientId: effective.FixedClientId),
                 log: message => Debug.Log(message),
                 logWarning: message => Debug.LogWarning(message),
                 logError: message => Debug.LogError(message),
                 logException: ex => Debug.LogException(ex),
-                requestOptions: _connectionSettings.ToRequestOptions(),
-                runtimeOptions: _connectionSettings.ToRuntimeOptions());
+                requestOptions: effective.ToRequestOptions(),
+                runtimeOptions: effective.ToRuntimeOptions());
 
             _initialized = true;
         }
@@ -192,28 +197,43 @@ namespace PullSub.Bridge
             }
         }
 
-        private static void LogBrokerModeSelection(
-            bool debugMode,
-            string defaultBrokerHost,
-            string debugBrokerHost,
-            string selectedBrokerHost,
-            int selectedBrokerPort)
+        private void LogDebugModeSelection()
         {
-            if (!debugMode)
+            if (!_debugMode)
                 return;
 
-            var defaultHost = string.IsNullOrWhiteSpace(defaultBrokerHost) ? "(empty)" : defaultBrokerHost;
-            var debugHost = string.IsNullOrWhiteSpace(debugBrokerHost) ? "(empty)" : debugBrokerHost;
-
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            var defaultHost = _connectionSettings?.BrokerHost ?? "(unknown)";
+            var defaultPort = _connectionSettings?.BrokerPort ?? 0;
+            var debugHost = _debugConnectionSettings?.BrokerHost ?? "(unknown)";
+            var debugPort = _debugConnectionSettings?.BrokerPort ?? 0;
             Debug.LogWarning(
-                $"[PullSubMqttClient] Debug Mode is enabled. Connecting to DebugBrokerHost '{debugHost}' " +
-                $"instead of DefaultBrokerHost '{defaultHost}' ({selectedBrokerHost}:{selectedBrokerPort}).");
+                $"[PullSubMqttClient] Debug Mode is enabled. " +
+                $"Connecting to debug settings ({debugHost}:{debugPort}) " +
+                $"instead of default settings ({defaultHost}:{defaultPort}).");
 #else
             Debug.LogWarning(
-                $"[PullSubMqttClient] Debug Mode is enabled in a non-development build. " +
-                $"Connecting to DebugBrokerHost '{debugHost}' instead of DefaultBrokerHost '{defaultHost}' ({selectedBrokerHost}:{selectedBrokerPort}).");
+                "[PullSubMqttClient] Debug Mode is enabled in Inspector but has been suppressed " +
+                "in this non-development build. Connecting with default settings.");
 #endif
+        }
+
+        private bool IsDebugModeActive()
+        {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            return _debugMode;
+#else
+            return false;
+#endif
+        }
+
+        private PullSubClientConnectionSettings GetEffectiveConnectionSettings()
+        {
+            if (!IsDebugModeActive())
+                return _connectionSettings;
+
+            EnsureDebugConnectionSettings();
+            return _debugConnectionSettings;
         }
 
         private async Task ReleaseRuntimeAsync()
@@ -280,6 +300,12 @@ namespace PullSub.Bridge
         {
             if (_connectionSettings == null)
                 _connectionSettings = new PullSubClientConnectionSettings();
+        }
+
+        private void EnsureDebugConnectionSettings()
+        {
+            if (_debugConnectionSettings == null)
+                _debugConnectionSettings = new PullSubClientConnectionSettings();
         }
 
         private bool HasLegacyConnectionOverrides()
