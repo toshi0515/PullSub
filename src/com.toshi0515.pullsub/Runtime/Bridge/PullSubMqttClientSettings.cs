@@ -133,7 +133,7 @@ namespace PullSub.Bridge
         [SerializeField] private float _backoffMultiplier = 2.0f;
 
         [Tooltip("Random jitter factor (0.0-1.0) applied to reconnect delays to avoid thundering herd.")]
-        [SerializeField] [Range(0f, 1f)] private float _jitterFactor = 0.2f;
+        [SerializeField][Range(0f, 1f)] private float _jitterFactor = 0.2f;
 
         public ReconnectOptions ToCoreOptions()
         {
@@ -203,7 +203,10 @@ namespace PullSub.Bridge
     public sealed class PullSubClientConnectionSettings
     {
         [Header("Broker")]
-        [SerializeField] private string _brokerHost = "127.0.0.1";
+        [SerializeField] private bool _debugMode;
+        [FormerlySerializedAs("_brokerHost")]
+        [SerializeField] private string _defaultBrokerHost = "127.0.0.1";
+        [SerializeField] private string _debugBrokerHost = "127.0.0.1";
         [SerializeField] private int _brokerPort = 1883;
         [SerializeField] private string _username = "";
         [SerializeField] private string _password = "";
@@ -234,17 +237,20 @@ namespace PullSub.Bridge
         [SerializeField] private PullSubClientWillSettings _willSettings = new PullSubClientWillSettings();
 
         [FormerlySerializedAs("_keepAliveSeconds")]
-        [SerializeField] [HideInInspector] private int _legacyKeepAliveSeconds = MqttKeepAliveOptions.DefaultSeconds;
-        [SerializeField] [HideInInspector] private bool _legacyKeepAliveMigrated;
+        [SerializeField][HideInInspector] private int _legacyKeepAliveSeconds = MqttKeepAliveOptions.DefaultSeconds;
+        [SerializeField][HideInInspector] private bool _legacyKeepAliveMigrated;
 
         [FormerlySerializedAs("_reconnectDelaySeconds")]
-        [SerializeField] [HideInInspector] private int _legacyReconnectDelaySeconds = 5;
-        [SerializeField] [HideInInspector] private bool _legacyReconnectMigrated;
+        [SerializeField][HideInInspector] private int _legacyReconnectDelaySeconds = 5;
+        [SerializeField][HideInInspector] private bool _legacyReconnectMigrated;
 
         [Header("TLS")]
         [SerializeField] private PullSubClientTlsSettings _tlsSettings = new PullSubClientTlsSettings();
 
-        public string BrokerHost => _brokerHost;
+        public bool DebugMode => _debugMode;
+        public string DefaultBrokerHost => _defaultBrokerHost;
+        public string DebugBrokerHost => _debugBrokerHost;
+        public string BrokerHost => _debugMode ? _debugBrokerHost : _defaultBrokerHost;
         public int BrokerPort => _brokerPort;
         public MqttClientIdPolicy ClientIdPolicy => _clientIdPolicy;
         public string FixedClientId => _fixedClientId;
@@ -335,7 +341,9 @@ namespace PullSub.Bridge
             MqttClientIdPolicy clientIdPolicy,
             string fixedClientId)
         {
-            _brokerHost = string.IsNullOrWhiteSpace(brokerHost) ? "127.0.0.1" : brokerHost;
+            _debugMode = false;
+            _defaultBrokerHost = string.IsNullOrWhiteSpace(brokerHost) ? "127.0.0.1" : brokerHost;
+            _debugBrokerHost = "127.0.0.1";
             _brokerPort = brokerPort > 0 ? brokerPort : 1883;
             _username = username ?? string.Empty;
             _password = password ?? string.Empty;

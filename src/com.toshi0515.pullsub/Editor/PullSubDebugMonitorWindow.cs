@@ -440,7 +440,8 @@ namespace PullSub.Editor
 
             var runtime = view.Runtime;
             var connection = GetConnectionSummary(client);
-            var label = $"{clientGameObject.name} ({connection.Host}:{connection.Port})";
+            var modeLabel = connection.DebugMode ? "Debug" : "Default";
+            var label = $"{clientGameObject.name} ({connection.Host}:{connection.Port}, {modeLabel})";
 
             using (new EditorGUILayout.VerticalScope("box"))
             {
@@ -457,6 +458,8 @@ namespace PullSub.Editor
                 if (runtime == null)
                 {
                     EditorGUILayout.LabelField($"Scene: {clientGameObject.scene.name}");
+                    EditorGUILayout.LabelField($"Broker: {connection.Host}:{connection.Port} | Mode: {modeLabel}");
+                    EditorGUILayout.LabelField($"Default: {connection.DefaultHost} | Debug: {connection.DebugHost}");
                     EditorGUILayout.LabelField($"ClientId: {connection.ClientIdText} | Policy: {connection.ClientIdPolicy}");
                     EditorGUILayout.HelpBox("Runtime is not initialized yet.", MessageType.Warning);
                     return;
@@ -472,6 +475,8 @@ namespace PullSub.Editor
 
                 EditorGUILayout.Space(4f);
                 EditorGUILayout.LabelField("Connection", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField($"Broker: {connection.Host}:{connection.Port} | Mode: {modeLabel}");
+                EditorGUILayout.LabelField($"Default: {connection.DefaultHost} | Debug: {connection.DebugHost}");
                 EditorGUILayout.LabelField($"ClientId: {connection.ClientIdText} | Policy: {connection.ClientIdPolicy}");
                 DrawReconnectSection(snapshot);
                 DrawRequestSection(snapshot.Request, snapshot.InboundOversizeDropCount);
@@ -747,11 +752,18 @@ namespace PullSub.Editor
             GUI.contentColor = previousColor;
         }
 
-        private static (string Host, int Port, string ClientIdPolicy, string ClientIdText) GetConnectionSummary(
+        private static (
+            string Host,
+            int Port,
+            string ClientIdPolicy,
+            string ClientIdText,
+            bool DebugMode,
+            string DefaultHost,
+            string DebugHost) GetConnectionSummary(
             PullSubMqttClient client)
         {
             if (client == null)
-                return ("unknown", 0, "Unknown", "(auto)");
+                return ("unknown", 0, "Unknown", "(auto)", false, "unknown", "unknown");
 
             try
             {
@@ -759,7 +771,7 @@ namespace PullSub.Editor
             }
             catch (MissingReferenceException)
             {
-                return ("unknown", 0, "Unknown", "(auto)");
+                return ("unknown", 0, "Unknown", "(auto)", false, "unknown", "unknown");
             }
         }
 

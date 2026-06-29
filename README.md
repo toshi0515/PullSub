@@ -251,6 +251,13 @@ dotnet add package PullSub.Mqtt
 
 Add `PullSubMqttClient` to a GameObject and configure the broker settings in the Inspector.
 
+`PullSubMqttClient` supports host switching for local debugging:
+
+- `Debug Mode` off: connects to `Default Broker Host`
+- `Debug Mode` on: connects to `Debug Broker Host`
+
+This is useful when using a local broker such as `127.0.0.1` during development while keeping the default destination for integration or production testing.
+
 ### 2. Define Topic and Type
 
 Define your data type and topic in a single file.
@@ -718,6 +725,13 @@ var connectionOptions = new MqttConnectionOptions(
 // Transport=Ws with TLS enabled is rejected at MqttConnectionOptions construction time.
 // Use Transport=Wss when TLS is required.
 ```
+
+### Unity Debug Broker Host
+
+In Unity, `PullSubMqttClient` Inspector provides `Debug Mode`, `Default Broker Host`, and `Debug Broker Host`.
+
+When `Debug Mode` is enabled, the component connects to `Debug Broker Host` instead of `Default Broker Host`.
+Only the host is switched. Port, credentials, TLS, WebSocket, client ID, and other connection options are shared.
 
 ### Last Will and Testament (LWT)
 

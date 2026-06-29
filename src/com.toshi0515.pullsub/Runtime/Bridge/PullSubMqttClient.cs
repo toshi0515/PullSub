@@ -40,14 +40,27 @@ namespace PullSub.Bridge
 
         public PullSubRuntime Runtime { get; private set; }
 
-        internal (string Host, int Port, string ClientIdPolicy, string ClientIdText) GetConnectionSummaryForDebugMonitor()
+        internal (
+            string Host,
+            int Port,
+            string ClientIdPolicy,
+            string ClientIdText,
+            bool DebugMode,
+            string DefaultHost,
+            string DebugHost) GetConnectionSummaryForDebugMonitor()
         {
             if (_connectionSettings == null)
-                return ("unknown", 0, "Unknown", "(auto)");
+                return ("unknown", 0, "Unknown", "(auto)", false, "unknown", "unknown");
 
             var host = string.IsNullOrWhiteSpace(_connectionSettings.BrokerHost)
                 ? "unknown"
                 : _connectionSettings.BrokerHost;
+            var defaultHost = string.IsNullOrWhiteSpace(_connectionSettings.DefaultBrokerHost)
+                ? "unknown"
+                : _connectionSettings.DefaultBrokerHost;
+            var debugHost = string.IsNullOrWhiteSpace(_connectionSettings.DebugBrokerHost)
+                ? "unknown"
+                : _connectionSettings.DebugBrokerHost;
             var clientIdText = string.IsNullOrWhiteSpace(_connectionSettings.FixedClientId)
                 ? "(auto)"
                 : _connectionSettings.FixedClientId;
@@ -56,7 +69,10 @@ namespace PullSub.Bridge
                 host,
                 _connectionSettings.BrokerPort,
                 _connectionSettings.ClientIdPolicy.ToString(),
-                clientIdText);
+                clientIdText,
+                _connectionSettings.DebugMode,
+                defaultHost,
+                debugHost);
         }
 
         private void Awake()
@@ -127,10 +143,19 @@ namespace PullSub.Bridge
             var connectionOptions = _connectionSettings.ToConnectionOptions();
             WarnIfInsecureTlsOptionsEnabled(connectionOptions);
 
+            var brokerHost = _connectionSettings.BrokerHost;
+            var brokerPort = _connectionSettings.BrokerPort;
+            LogBrokerModeSelection(
+                _connectionSettings.DebugMode,
+                _connectionSettings.DefaultBrokerHost,
+                _connectionSettings.DebugBrokerHost,
+                brokerHost,
+                brokerPort);
+
             Runtime = new PullSubRuntime(
                 transport: new MqttTransport(
-                    brokerHost: _connectionSettings.BrokerHost,
-                    brokerPort: _connectionSettings.BrokerPort,
+                    brokerHost: brokerHost,
+                    brokerPort: brokerPort,
                     connectionOptions: connectionOptions,
                     clientIdPolicy: _connectionSettings.ClientIdPolicy,
                     fixedClientId: _connectionSettings.FixedClientId),
@@ -165,6 +190,30 @@ namespace PullSub.Bridge
                     "Use strict certificate validation for production deployments.");
 #endif
             }
+        }
+
+        private static void LogBrokerModeSelection(
+            bool debugMode,
+            string defaultBrokerHost,
+            string debugBrokerHost,
+            string selectedBrokerHost,
+            int selectedBrokerPort)
+        {
+            if (!debugMode)
+                return;
+
+            var defaultHost = string.IsNullOrWhiteSpace(defaultBrokerHost) ? "(empty)" : defaultBrokerHost;
+            var debugHost = string.IsNullOrWhiteSpace(debugBrokerHost) ? "(empty)" : debugBrokerHost;
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.LogWarning(
+                $"[PullSubMqttClient] Debug Mode is enabled. Connecting to DebugBrokerHost '{debugHost}' " +
+                $"instead of DefaultBrokerHost '{defaultHost}' ({selectedBrokerHost}:{selectedBrokerPort}).");
+#else
+            Debug.LogWarning(
+                $"[PullSubMqttClient] Debug Mode is enabled in a non-development build. " +
+                $"Connecting to DebugBrokerHost '{debugHost}' instead of DefaultBrokerHost '{defaultHost}' ({selectedBrokerHost}:{selectedBrokerPort}).");
+#endif
         }
 
         private async Task ReleaseRuntimeAsync()
